@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Landmarks + postcard test</title>
+<!-- Serve with: node scripts/serve-test.mjs  →  http://localhost:4794/scripts/landmarks-test.html
+     (server.mjs only serves /web, /three and /assets, so this page has its own tiny static server.) -->
+<style>
+  html, body { margin: 0; height: 100%; background: radial-gradient(ellipse at 50% 45%, #3a3566 0%, #1d1b38 55%, #12112a 100%); font-family: ui-rounded, -apple-system, sans-serif; color: #fff; overflow: hidden; }
+  #bar { position: fixed; top: 10px; left: 10px; display: flex; gap: 8px; flex-wrap: wrap; z-index: 2; }
+  button { font: inherit; padding: 6px 12px; border-radius: 12px; border: 0; background: #fff; color: #3b3552; cursor: pointer; }
+  #out { position: fixed; right: 10px; top: 10px; width: 300px; z-index: 2; }
+  #out img { width: 100%; border-radius: 10px; box-shadow: 0 8px 30px #0008; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="bar"></div>
+<div id="out"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { buildWorld, R, offsetDir, height, WATER, place, piece, at } from '/web/world.js';
+import { makeFX } from '/web/fx.js';
+import { createLandmarks, themeOf } from '/web/landmarks.js';
+import { makePostcard } from '/web/postcard.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 200);
+scene.add(camera);
+scene.add(new THREE.HemisphereLight(0xfff4e0, 0x7d70b8, 1.35));
+const sun = new THREE.DirectionalLight(0xfff0dc, 2.0); sun.position.set(6, 7, 5); camera.add(sun);
+const rim = new THREE.DirectionalLight(0xa9c8ff, 0.7); rim.position.set(-6, -2, -6); camera.add(rim);
+const W = buildWorld(scene, camera);
+const fx = makeFX(W.world);
+const controls = new OrbitControls(camera, renderer.domElement);
+
+// 5 fake plots spread around the camp, one per theme
+const NAMES = [
+  ['PHAM outreach', '#3987e5'], ['Proposals', '#d95926'], ['bot-planet', '#199e70'], ['Facturen', '#c98500'], ['Garden journal', '#d55181'],
+];
+const plots = [];
+let tries = 0;
+for (let i = 0; plots.length < NAMES.length && tries < 400; tries++, i++) {
+  const d = offsetDir(W.campDir, (plots.length / NAMES.length) * Math.PI * 2 + tries * 0.13, 0.85 + (tries % 5) * 0.05);
+  if (height(d) < WATER + 0.04 || plots.some((p) => p.dir.angleTo(d) < 0.4)) continue;
+  const [name, color] = NAMES[plots.length];
+  plots.push({ key: '/Users/x/' + name, name, dir: d, level: 4, color });
+}
+// stand-in houses so the scale reads right
+{
+  const geos = plots.flatMap((p) => place([
+    piece(new THREE.BoxGeometry(0.2, 0.12, 0.17), '#fff6e8', at(0, 0.06, 0)),
+    piece(new THREE.ConeGeometry(0.16, 0.12, 4), p.color, at(0, 0.17, 0, 0, Math.PI / 4, 0)),
+  ], p.dir, 0, 1.75));
+  const { mergeGeometries } = await import('three/addons/utils/BufferGeometryUtils.js');
+  W.world.add(new THREE.Mesh(mergeGeometries(geos), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+}
+const lm = createLandmarks({ world: W.world, fx });
+lm.update(plots);
+lm.update(plots); // second call must be a no-op
+window.lm = lm; window.plots = plots; window.themeOf = themeOf;
+
+// camera: whole planet from the camp side, or a close-up between a house and its landmark
+function look(dir, dist = 12) {
+  controls.target.set(0, 0, 0);
+  camera.up.set(0, 1, 0);
+  camera.position.copy(dir).multiplyScalar(dist);
+  controls.update();
+}
+look(W.campDir);
+window.look = (i, d = 1.5, up = 0.9) => {
+  if (i == null) return look(W.campDir);
+  const p = plots[i], m = lm.marks.get(p.key);
+  const mid = m.dir.clone().add(p.dir).normalize().multiplyScalar(R + 0.15);
+  const side = new THREE.Vector3().crossVectors(p.dir, m.dir).normalize();
+  controls.target.copy(mid);
+  camera.up.copy(p.dir);
+  camera.position.copy(mid).addScaledVector(p.dir, up).addScaledVector(side, d);
+  controls.update();
+};
+// front view of a landmark (its door faces the house)
+window.front = (i, d = 1.25, up = 0.55, sideK = 0.5) => {
+  const p = plots[i], m = lm.marks.get(p.key);
+  const tgt = m.dir.clone().multiplyScalar(R + 0.2);
+  const toHouse = p.dir.clone().sub(m.dir).projectOnPlane(m.dir).normalize();
+  const side = new THREE.Vector3().crossVectors(m.dir, toHouse).normalize();
+  controls.target.copy(tgt);
+  camera.up.copy(m.dir);
+  camera.position.copy(tgt).addScaledVector(toHouse, d).addScaledVector(side, d * sideK).addScaledVector(m.dir, up);
+  controls.update();
+};
+window.three = { renderer, scene, camera, controls };
+const bar = document.getElementById('bar');
+const btn = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = fn; bar.appendChild(b); };
+for (const p of plots) btn(`${themeOf(p.name, p.key)}: pulse`, () => lm.pulse(p.name));
+btn('postcard', () => window.postcard());
+btn('postcard (no logbook)', () => window.postcard(null));
+
+const FAKE = (() => {
+  const today = '2026-10-15';
+  const days = (seed) => {
+    const out = {};
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(2026, 9, 15 - i);
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      out[k] = { turns: (seed * (i + 3)) % 17, activeMin: (seed * (i + 5)) % 50, tokOut: ((seed * (i + 7)) % 13) * 1800 };
+    }
+    return out;
+  };
+  return { today, projects: plots.map((p, i) => ({ key: p.key, name: p.name, days: days(i * 3 + 2) })) };
+})();
+window.postcard = async (logbook = FAKE) => {
+  const url = await makePostcard({ renderer, scene, camera, logbook, palette: Object.fromEntries(plots.map((p) => [p.name, p.color])), weekLabel: 'Week of 12 – 18 October 2026' });
+  document.getElementById('out').innerHTML = `<img src="${url}">`;
+  window.lastPostcard = url;
+  return url.length;
+};
+
+// manual stepping so screenshots work while the pane is hidden
+let t = 0;
+window.step = (n = 1, dt = 1 / 30) => {
+  for (let i = 0; i < n; i++) { t += dt; W.update(t, dt); lm.tick(t, dt); fx.update(dt); }
+  controls.update();
+  renderer.render(scene, camera);
+  return t;
+};
+let last = performance.now();
+renderer.setAnimationLoop((now) => {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  t += dt; W.update(t, dt); lm.tick(t, dt); fx.update(dt);
+  controls.update();
+  renderer.render(scene, camera);
+});
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+window.ready = true;
+</script>
+</body>
+</html>

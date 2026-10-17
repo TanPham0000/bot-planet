@@ -1,0 +1,190 @@
+<!doctype html>
+<!-- Bot Planet icon art. Rendered by scripts/make-icons.mjs: ?kind=app|tray|alert&size=<px> -->
+<html><head><meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  svg { display: block; }
+</style></head>
+<body>
+<script>
+const q = new URLSearchParams(location.search);
+const kind = q.get('kind') || 'app';
+const size = +q.get('size') || (kind === 'app' ? 1024 : 36);
+const NS = 'http://www.w3.org/2000/svg';
+
+// Deterministic randomness so every render is identical.
+let seed = 7;
+const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+
+// ── app icon ────────────────────────────────────────────────────────────────
+function appIcon() {
+  // Big Sur grid: 824 body centred in 1024, continuous-corner squircle.
+  const S = 824, O = 100, R = 186;
+  const squircle = `M${O + R},${O} H${O + S - R} C${O + S - R * 0.36},${O} ${O + S},${O + R * 0.36} ${O + S},${O + R}
+    V${O + S - R} C${O + S},${O + S - R * 0.36} ${O + S - R * 0.36},${O + S} ${O + S - R},${O + S}
+    H${O + R} C${O + R * 0.36},${O + S} ${O},${O + S - R * 0.36} ${O},${O + S - R}
+    V${O + R} C${O},${O + R * 0.36} ${O + R * 0.36},${O} ${O + R},${O} Z`;
+
+  // Stars
+  let stars = '';
+  const starSpots = [[205, 215, 5], [300, 300, 3.5], [770, 205, 4], [835, 330, 3], [690, 300, 2.6], [250, 420, 2.8],
+    [420, 190, 3], [860, 450, 2.5], [170, 330, 2.4], [560, 165, 2.4], [600, 245, 2]];
+  for (const [x, y, r] of starSpots) stars += `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" opacity="${0.55 + r / 12}"/>`;
+  const sparkle = (x, y, s, o = 1) => `<path transform="translate(${x} ${y}) scale(${s})" opacity="${o}" fill="#fff"
+    d="M0,-20 C2,-4 4,-2 20,0 C4,2 2,4 0,20 C-2,4 -4,2 -20,0 C-4,-2 -2,-4 0,-20 Z"/>`;
+  stars += sparkle(250, 255, 1.25) + sparkle(800, 395, 0.9, 0.9) + sparkle(345, 380, 0.6, 0.8);
+
+  // Low-poly planet: a jittered triangle grid inside a disc, coloured by a cheap noise field
+  // and shaded as if it were a sphere lit from the upper left.
+  const P = { x: 512, y: 1150, r: 560 };
+  const N = 15, step = (P.r * 2) / N, pts = [];
+  for (let j = 0; j <= N; j++) {
+    pts.push([]);
+    for (let i = 0; i <= N; i++) {
+      const edge = i === 0 || j === 0 || i === N || j === N;
+      const jx = edge ? 0 : (rnd() - 0.5) * step * 0.7, jy = edge ? 0 : (rnd() - 0.5) * step * 0.7;
+      pts[j].push([P.x - P.r + i * step + jx, P.y - P.r + j * step + jy]);
+    }
+  }
+  const noise = (x, y) => Math.sin(x * 0.011 + 1.3) * Math.cos(y * 0.014 - 0.4) + 0.6 * Math.sin((x + y) * 0.02 + 2.1);
+  const palette = (h) => h < -0.55 ? [126, 196, 232] : h < -0.25 ? [150, 214, 240] : h < -0.1 ? [242, 222, 170]
+    : h < 0.55 ? [134, 210, 140] : h < 0.95 ? [104, 186, 120] : [84, 160, 108];
+  let tris = '';
+  const tri = (a, b, c) => {
+    const cx = (a[0] + b[0] + c[0]) / 3, cy = (a[1] + b[1] + c[1]) / 3;
+    const dx = (cx - P.x) / P.r, dy = (cy - P.y) / P.r, d2 = dx * dx + dy * dy;
+    if (d2 > 1.08) return;
+    const nz = Math.sqrt(Math.max(0, 1 - Math.min(1, d2)));
+    const light = Math.max(0, -dx * 0.45 - dy * 0.6 + nz * 0.65);
+    const shade = 0.62 + 0.5 * light + (rnd() - 0.5) * 0.08;
+    const col = palette(noise(cx, cy)).map((v) => Math.min(255, Math.round(v * shade)));
+    tris += `<polygon points="${a} ${b} ${c}" fill="rgb(${col})" stroke="rgb(${col})" stroke-width="1.2" stroke-linejoin="round"/>`;
+  };
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const a = pts[j][i], b = pts[j][i + 1], c = pts[j + 1][i], d = pts[j + 1][i + 1];
+    if ((i + j) % 2) { tri(a, b, d); tri(a, d, c); } else { tri(a, b, c); tri(b, d, c); }
+  }
+  // A few little trees / rocks on the horizon for scale
+  const tree = (x, y, s) => `<g transform="translate(${x} ${y}) scale(${s})">
+    <rect x="-4" y="-6" width="8" height="18" rx="3" fill="#8a5a3c"/>
+    <polygon points="0,-62 -26,-4 26,-4" fill="#4f9c6a"/><polygon points="0,-62 0,-4 26,-4" fill="#3f8559"/></g>`;
+
+  // Astronaut (stands on the planet's top at ~y=590)
+  const ax = 512, ay = 598;
+  const astro = `
+  <g transform="translate(${ax} ${ay})">
+    <ellipse cx="0" cy="6" rx="112" ry="20" fill="#1c2c3a" opacity="0.28"/>
+    <!-- backpack -->
+    <rect x="-118" y="-212" width="236" height="170" rx="56" fill="#c45f42"/>
+    <rect x="-112" y="-208" width="224" height="160" rx="52" fill="#D97757"/>
+    <!-- legs -->
+    <rect x="-66" y="-70" width="54" height="74" rx="26" fill="#e3e7f2"/>
+    <rect x="12" y="-70" width="54" height="74" rx="26" fill="#e3e7f2"/>
+    <rect x="-70" y="-18" width="62" height="26" rx="13" fill="#b9c0d6"/>
+    <rect x="8" y="-18" width="62" height="26" rx="13" fill="#b9c0d6"/>
+    <!-- lowered arm (left) -->
+    <rect x="-128" y="-176" width="52" height="118" rx="26" fill="#eef1f8" transform="rotate(14 -102 -170)"/>
+    <circle cx="-118" cy="-62" r="25" fill="#cfd5e6"/>
+    <!-- body -->
+    <rect x="-96" y="-196" width="192" height="160" rx="70" fill="#f6f7fb"/>
+    <path d="M-96 -120 a96 76 0 0 0 192 0 v24 a70 70 0 0 1 -70 60 h-52 a70 70 0 0 1 -70 -60 Z" fill="#dfe3ef"/>
+    <rect x="-34" y="-148" width="68" height="44" rx="14" fill="#d8dcea"/>
+    <circle cx="-14" cy="-126" r="9" fill="#D97757"/><circle cx="14" cy="-126" r="9" fill="#7fe7ff"/>
+    <!-- waving arm (right) -->
+    <g transform="rotate(46 93 -165)">
+      <rect x="66" y="-300" width="54" height="140" rx="27" fill="#f6f7fb"/>
+      <circle cx="93" cy="-302" r="29" fill="#dfe3ef"/>
+    </g>
+    <!-- helmet -->
+    <rect x="-4" y="-430" width="8" height="58" rx="4" fill="#cfd5e6"/>
+    <circle cx="0" cy="-440" r="25" fill="#D97757"/>
+    <circle cx="0" cy="-440" r="40" fill="#ff9a6e" opacity="0.28"/>
+    <circle cx="-8" cy="-448" r="7" fill="#ffd3bf"/>
+    <rect x="-150" y="-392" width="300" height="222" rx="104" fill="#f6f7fb"/>
+    <path d="M-150 -290 v16 a104 104 0 0 0 104 104 h92 a104 104 0 0 0 104 -104 v-16 a104 104 0 0 1 -104 104 h-92 a104 104 0 0 1 -104 -104 Z" fill="#dde2ee"/>
+    <rect x="-112" y="-358" width="224" height="150" rx="70" fill="#1d1a3a"/>
+    <rect x="-112" y="-358" width="224" height="150" rx="70" fill="url(#visor)"/>
+    <path d="M-80 -336 q40 -14 84 -6" stroke="#fff" stroke-width="12" stroke-linecap="round" fill="none" opacity="0.32"/>
+    <!-- eyes -->
+    <g filter="url(#glow)">
+      <rect x="-60" y="-312" width="36" height="58" rx="18" fill="#5ff0ff"/>
+      <rect x="24" y="-312" width="36" height="58" rx="18" fill="#5ff0ff"/>
+    </g>
+    <rect x="-52" y="-304" width="12" height="18" rx="6" fill="#e9feff"/>
+    <rect x="32" y="-304" width="12" height="18" rx="6" fill="#e9feff"/>
+  </g>
+  <!-- wave motion lines -->
+  <g stroke="#fff" stroke-width="10" stroke-linecap="round" fill="none" opacity="0.75">
+    <path d="M742 292 q22 16 22 46"/><path d="M774 266 q32 26 30 72"/>
+  </g>
+  <!-- "!" bubble -->
+  <g transform="translate(250 470) rotate(-8)">
+    <path d="M-58,-60 h116 a34 34 0 0 1 34 34 v52 a34 34 0 0 1 -34 34 h-44 l-34 30 l4 -30 h-42 a34 34 0 0 1 -34 -34 v-52 a34 34 0 0 1 34 -34 Z" fill="#D97757"/>
+    <rect x="-11" y="-42" width="22" height="58" rx="11" fill="#fff"/>
+    <circle cx="0" cy="38" r="12" fill="#fff"/>
+  </g>`;
+
+  return `<svg xmlns="${NS}" width="${size}" height="${size}" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#3a2a86"/><stop offset="0.55" stop-color="#2a1f66"/><stop offset="1" stop-color="#160f3d"/>
+    </linearGradient>
+    <radialGradient id="nebula" cx="0.78" cy="0.22" r="0.55">
+      <stop offset="0" stop-color="#b56cd6" stop-opacity="0.55"/><stop offset="1" stop-color="#b56cd6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="atmo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.86" stop-color="#9fe6ff" stop-opacity="0.45"/><stop offset="1" stop-color="#9fe6ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="visor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a3470" stop-opacity="0.9"/><stop offset="1" stop-color="#0f0d24" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow" x="-1" y="-1" width="3" height="3"><feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="shadow" x="-0.2" y="-0.2" width="1.4" height="1.4">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.32"/></filter>
+    <clipPath id="clip"><path d="${squircle}"/></clipPath>
+    <clipPath id="disc"><circle cx="${P.x}" cy="${P.y}" r="${P.r}"/></clipPath>
+  </defs>
+  <path d="${squircle}" fill="#160f3d" filter="url(#shadow)"/>
+  <g clip-path="url(#clip)">
+    <rect width="1024" height="1024" fill="url(#sky)"/>
+    <rect width="1024" height="1024" fill="url(#nebula)"/>
+    ${stars}
+    <circle cx="${P.x}" cy="${P.y}" r="${P.r + 46}" fill="url(#atmo)"/>
+    <g clip-path="url(#disc)">${tris}</g>
+    ${tree(250, 680, 1)}${tree(205, 708, 0.7)}${tree(800, 690, 0.85)}
+    ${astro}
+  </g>
+  <path d="${squircle}" fill="none" stroke="#fff" stroke-opacity="0.08" stroke-width="3"/>
+</svg>`;
+}
+
+// ── menu bar glyph (36 × 36 design grid) ─────────────────────────────────────
+function trayIcon(color) {
+  // Helmet peeking over a planet's horizon, waving from behind it.
+  return `<svg xmlns="${NS}" width="${size}" height="${size}" viewBox="0 0 36 36">
+  <defs><mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="36" height="36">
+    <rect width="36" height="36" fill="#fff"/>
+    <circle cx="16" cy="14.5" r="10.2" fill="#000"/>
+    <path d="M27 24 L29.8 13.4" stroke="#000" stroke-width="6.4" stroke-linecap="round"/>
+    <circle cx="6.5" cy="31.5" r="2.1" fill="#000"/><circle cx="14" cy="33" r="1.2" fill="#000"/><circle cx="25" cy="31" r="1.6" fill="#000"/>
+  </mask>
+  <mask id="h" maskUnits="userSpaceOnUse" x="0" y="0" width="36" height="36">
+    <rect width="36" height="36" fill="#fff"/>
+    <rect x="8.6" y="10" width="14.8" height="9.6" rx="4.8" fill="#000"/>
+  </mask></defs>
+  <g fill="${color}">
+    <circle cx="18" cy="44" r="22" mask="url(#m)"/>
+    <circle cx="16" cy="14.5" r="8.4" mask="url(#h)"/>
+    <rect x="11.4" y="12.2" width="2.6" height="5.2" rx="1.3"/><rect x="18" y="12.2" width="2.6" height="5.2" rx="1.3"/>
+    <rect x="15.1" y="2.6" width="1.8" height="4.6" rx="0.9"/><circle cx="16" cy="2.8" r="2.2"/>
+    <path d="M27.2 25 L29.6 14.4" stroke="${color}" stroke-width="3.4" stroke-linecap="round"/>
+    <circle cx="30.2" cy="12" r="3"/>
+  </g>
+</svg>`;
+}
+
+document.body.innerHTML = kind === 'app' ? appIcon() : trayIcon(kind === 'alert' ? '#E8784F' : '#000');
+document.title = 'ready';
+</script>
+</body></html>

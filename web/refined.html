@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Bot Planet — refined astronaut</title>
+<style>html, body { margin: 0; background: #14122a; } canvas { display: block; }</style>
+<script type="importmap">{ "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" } }</script>
+</head>
+<body>
+<script type="module">
+// Close-up of the real crew model (web/astronaut.js) next to the previous look, for design review.
+import * as THREE from 'three';
+import { Astronaut } from './astronaut.js';
+import { makeFX } from './fx.js';
+
+const W = 1600, H = 560, N = 4, CW = W / N;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(2); renderer.setSize(W, H);
+renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.setScissorTest(true);
+document.body.appendChild(renderer.domElement);
+
+function before() {
+  // the previous helmet/visor/eyes, for comparison
+  const g = new THREE.Group();
+  const white = new THREE.MeshPhongMaterial({ color: '#fdfbf7', shininess: 40, specular: '#444' });
+  const visor = new THREE.MeshPhongMaterial({ color: '#2a2b45', shininess: 120, specular: '#9ab' });
+  const acc = new THREE.MeshLambertMaterial({ color: '#3987e5' });
+  const m = (geo, mat, x, y, z, sx = 1, sy = sx, sz = sx) => { const o = new THREE.Mesh(geo, mat); o.position.set(x, y, z); o.scale.set(sx, sy, sz); g.add(o); return o; };
+  m(new THREE.CapsuleGeometry(0.11, 0.09, 4, 10), white, 0, 0.25, 0, 1.08, 1, 0.95);
+  m(new THREE.BoxGeometry(0.17, 0.17, 0.08), acc, 0, 0.29, -0.115);
+  m(new THREE.SphereGeometry(0.155, 18, 14), white, 0, 0.46, 0);
+  m(new THREE.SphereGeometry(0.12, 18, 14), visor, 0, 0.465, 0.07, 1, 0.78, 0.75);
+  for (const s of [-1, 1]) m(new THREE.CapsuleGeometry(0.014, 0.012, 3, 6), new THREE.MeshBasicMaterial({ color: '#c8fbff' }), s * 0.042, 0.47, 0.155);
+  for (const s of [-1, 1]) {
+    const p = new THREE.Group(); p.position.set(s * 0.135, 0.33, 0); p.rotation.z = s > 0 ? 2.5 : -0.25;
+    const a = new THREE.Mesh(new THREE.CapsuleGeometry(0.034, 0.08, 3, 6), white); a.position.y = -0.054; p.add(a);
+    const gl = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 6), acc); gl.position.y = -0.111; p.add(gl); g.add(p);
+    const l = new THREE.Mesh(new THREE.CapsuleGeometry(0.043, 0.05, 3, 6), white); l.position.set(s * 0.055, 0.118, 0); g.add(l);
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.054, 8, 6), acc); b.position.set(s * 0.055, 0.071, 0.012); b.scale.set(1, 0.72, 1.25); g.add(b);
+  }
+  return g;
+}
+
+const cells = [
+  { label: 'Before', make: () => before() },
+  { label: 'Refined · PHAM.', data: { id: 'a', name: 'PHAM.', status: 'idle' } },
+  { label: 'Refined · OUTREACH', data: { id: 'b', name: 'OUTREACH', status: 'idle' } },
+  { label: 'Refined · bot-planet', data: { id: 'c', name: 'bot-planet', status: 'idle' } },
+];
+const labels = [];
+cells.forEach((cell, i) => {
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xfff4e0, 0x7d70b8, 1.35));
+  const sun = new THREE.DirectionalLight(0xfff0dc, 2.0); sun.position.set(2, 3, 3); scene.add(sun);
+  const ground = new THREE.Mesh(new THREE.SphereGeometry(3, 48, 24), new THREE.MeshLambertMaterial({ color: '#a6d98f', flatShading: true }));
+  ground.position.y = -3; scene.add(ground);
+  let bot;
+  if (cell.make) bot = cell.make();
+  else {
+    const world = new THREE.Group();
+    const a = new Astronaut({ ...cell.data, tool: '', subagents: [], since: Date.now() }, { world, fx: makeFX(world), campDir: new THREE.Vector3(0, 1, 0), campRadius: 0.1, seatDir: () => null }, new THREE.Vector3(0, 1, 0));
+    a.root.position.set(0, 0, 0); a.root.quaternion.identity(); a.root.scale.setScalar(1);
+    a.armR.rotation.z = 2.5; a.armL.rotation.z = -0.25;
+    bot = a.root;
+  }
+  bot.rotation.y = 0.32; scene.add(bot);
+  const cam = new THREE.PerspectiveCamera(26, CW / H, 0.01, 50);
+  cam.position.set(0.32, 0.62, 1.45); cam.lookAt(0, 0.36, 0);
+  renderer.setViewport(i * CW, 0, CW, H); renderer.setScissor(i * CW, 0, CW, H);
+  renderer.setClearColor(i ? 0x1e1b3d : 0x2a2440, 1);
+  renderer.render(scene, cam);
+  labels.push([cell.label, i * CW + CW / 2]);
+});
+window.__labels = labels;
+</script>
+</body>
+</html>

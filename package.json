@@ -1,0 +1,24 @@
+{
+  "name": "bot-planet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A cozy 3D planet where your Claude Code sessions live as little astronauts — and wave when they need you.",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "BOT_PLANET_DEBUG=1 electron .",
+    "serve": "node server.mjs",
+    "install-hooks": "node scripts/install-hooks.mjs",
+    "icons": "electron scripts/make-icons.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^33.4.11"
+  },
+  "productName": "Bot Planet"
+}

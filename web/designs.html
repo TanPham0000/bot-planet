@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Bot Planet — astronaut designs</title>
+<style>
+  html, body { margin: 0; background: #14122a; color: #fff; font-family: ui-rounded, "SF Pro Rounded", -apple-system, sans-serif; }
+  #wrap { position: relative; width: 1200px; height: 860px; margin: 0 auto; }
+  canvas { display: block; }
+  .lab { position: absolute; width: 400px; text-align: center; pointer-events: none; }
+  .lab b { display: block; font-size: 22px; font-weight: 800; }
+  .lab span { font-size: 13px; color: rgba(255,255,255,.65); }
+</style>
+<script type="importmap">{ "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" } }</script>
+</head>
+<body>
+<div id="wrap"></div>
+<script type="module">
+import * as THREE from 'three';
+
+// Six design directions for the crew, same pose (waving) and lighting so they compare fairly.
+const W = 1200, H = 860, COLS = 3, ROWS = 2, CW = W / COLS, CH = H / ROWS;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(2); renderer.setSize(W, H);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.setScissorTest(true);
+document.getElementById('wrap').appendChild(renderer.domElement);
+
+const lam = (c, o = {}) => new THREE.MeshLambertMaterial({ color: c, flatShading: true, ...o });
+const pho = (c, o = {}) => new THREE.MeshPhongMaterial({ color: c, shininess: 40, specular: '#444', ...o });
+const M = {
+  white: pho('#fdfbf7'), cream: pho('#f4ecdf'), visor: pho('#2a2b45', { shininess: 120, specular: '#9ab' }),
+  gold: pho('#e9b44c', { shininess: 140, specular: '#fff3c4' }), eye: new THREE.MeshBasicMaterial({ color: '#c8fbff' }),
+  glass: new THREE.MeshPhongMaterial({ color: '#cfefff', transparent: true, opacity: 0.32, shininess: 160, specular: '#ffffff', depthWrite: false }),
+  metal: lam('#c9c6d8'), dark: lam('#3b3552'), pink: lam('#ff9fb4'), orange: pho('#f08a4b'),
+};
+const add = (g, geo, mat, x = 0, y = 0, z = 0, sx = 1, sy = sx, sz = sx) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); g.add(m); return m; };
+const sph = (r, a = 20, b = 14) => new THREE.SphereGeometry(r, a, b);
+const cap = (r, l) => new THREE.CapsuleGeometry(r, l, 6, 12);
+const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+
+/** an arm pivot at (x,y): hanging capsule + mitt; rz rotates it outward/up */
+function arm(g, x, y, mat, mitt, rz, len = 0.08, r = 0.034) {
+  const p = new THREE.Group(); p.position.set(x, y, 0); p.rotation.z = rz;
+  add(p, cap(r, len), mat, 0, -len / 2 - r * 0.4); add(p, sph(r * 1.25, 10, 8), mitt, 0, -len - r * 0.9);
+  g.add(p); return p;
+}
+function leg(g, x, mat, boot, len = 0.05, r = 0.043) {
+  add(g, cap(r, len), mat, x, 0.16 - len / 2 - r * 0.4); const b = add(g, sph(r * 1.25, 10, 8), boot, x, 0.16 - len - r * 0.9 + 0.003, 0.012); b.scale.set(1, 0.72, 1.25);
+}
+
+// ── A. Classic (today's crew, refined: rounder, softer, cheek glow) ──
+function classic(acc) {
+  const g = new THREE.Group(), a = lam(acc);
+  add(g, cap(0.115, 0.09), M.white, 0, 0.25).scale.set(1.08, 1, 0.95);
+  add(g, box(0.17, 0.17, 0.08), a, 0, 0.29, -0.115);
+  add(g, new THREE.CircleGeometry(0.03, 14), a, 0.045, 0.28, 0.107);
+  add(g, sph(0.16), M.white, 0, 0.46);
+  add(g, sph(0.123), M.visor, 0, 0.465, 0.07, 1, 0.78, 0.75);
+  for (const s of [-1, 1]) add(g, cap(0.015, 0.012), M.eye, s * 0.042, 0.47, 0.157);
+  add(g, new THREE.CylinderGeometry(0.006, 0.006, 0.08, 5), M.white, 0, 0.64); add(g, sph(0.025, 10, 8), a, 0, 0.685);
+  arm(g, -0.135, 0.33, M.white, a, -0.25); arm(g, 0.135, 0.33, M.white, a, 2.5);
+  leg(g, -0.055, M.white, a); leg(g, 0.055, M.white, a);
+  return g;
+}
+
+// ── B. Bubble buddy: big glass fishbowl helmet with a little round creature inside ──
+function bubble(acc) {
+  const g = new THREE.Group(), a = lam(acc);
+  add(g, cap(0.105, 0.05), M.white, 0, 0.22).scale.set(1.15, 1, 1.05);
+  add(g, new THREE.TorusGeometry(0.1, 0.022, 8, 24), a, 0, 0.3).rotation.x = Math.PI / 2;  // collar ring
+  add(g, box(0.15, 0.13, 0.07), a, 0, 0.25, -0.11);
+  const face = add(g, sph(0.105), M.orange, 0, 0.44, 0.01);                                 // the creature
+  for (const s of [-1, 1]) { add(g, sph(0.016, 8, 6), M.dark, s * 0.04, 0.455, 0.104); add(g, sph(0.018, 8, 6), M.pink, s * 0.066, 0.425, 0.092); }
+  add(g, new THREE.TorusGeometry(0.022, 0.006, 6, 12, Math.PI), M.dark, 0, 0.425, 0.108).rotation.z = Math.PI; // smile
+  add(g, sph(0.175, 28, 20), M.glass, 0, 0.45);                                             // fishbowl
+  arm(g, -0.13, 0.3, M.white, a, -0.3); arm(g, 0.13, 0.3, M.white, a, 2.5);
+  leg(g, -0.05, M.white, a, 0.03); leg(g, 0.05, M.white, a, 0.03);
+  return g;
+}
+
+// ── C. Retro tin bot: boxy helmet, rivets, square visor, dish ears ──
+function retro(acc) {
+  const g = new THREE.Group(), a = lam(acc), tin = lam('#d9dce6');
+  add(g, box(0.2, 0.19, 0.16), tin, 0, 0.25);
+  add(g, box(0.12, 0.06, 0.012), a, 0, 0.26, 0.085);                          // chest panel
+  for (const x of [-0.035, 0, 0.035]) add(g, sph(0.008, 6, 4), new THREE.MeshBasicMaterial({ color: x ? '#ffd166' : '#7fffd4' }), x, 0.26, 0.093);
+  add(g, box(0.22, 0.18, 0.18), tin, 0, 0.46);                                 // head
+  add(g, box(0.16, 0.08, 0.01), M.visor, 0, 0.465, 0.091);
+  for (const s of [-1, 1]) {
+    add(g, box(0.034, 0.02, 0.006), M.eye, s * 0.04, 0.468, 0.097);
+    add(g, new THREE.CylinderGeometry(0.035, 0.02, 0.03, 10), a, s * 0.125, 0.47).rotation.z = s * Math.PI / 2; // ear dishes
+  }
+  for (const [x, y] of [[-0.095, 0.54], [0.095, 0.54], [-0.095, 0.385], [0.095, 0.385]]) add(g, sph(0.008, 6, 4), M.metal, x, y, 0.091);
+  add(g, new THREE.CylinderGeometry(0.006, 0.006, 0.09, 5), tin, 0, 0.6); add(g, sph(0.026, 10, 8), a, 0, 0.65);
+  arm(g, -0.13, 0.31, tin, M.dark, -0.2, 0.09, 0.03); arm(g, 0.13, 0.31, tin, M.dark, 2.5, 0.09, 0.03);
+  add(g, box(0.055, 0.1, 0.07), tin, -0.05, 0.08); add(g, box(0.055, 0.1, 0.07), tin, 0.05, 0.08);
+  add(g, box(0.07, 0.035, 0.1), M.dark, -0.05, 0.02, 0.012); add(g, box(0.07, 0.035, 0.1), M.dark, 0.05, 0.02, 0.012);
+  return g;
+}
+
+// ── D. Mochi: one soft gumdrop body in the project colour, visor band, tiny nubs ──
+function mochi(acc) {
+  const g = new THREE.Group(), a = pho(acc, { shininess: 25 });
+  const body = add(g, sph(0.2, 28, 20), a, 0, 0.22); body.scale.set(1, 1.08, 0.92);
+  add(g, sph(0.13, 24, 16), M.visor, 0, 0.29, 0.1, 1.1, 0.55, 0.6);
+  for (const s of [-1, 1]) { add(g, cap(0.017, 0.014), M.eye, s * 0.045, 0.3, 0.183); add(g, sph(0.02, 8, 6), M.pink, s * 0.1, 0.22, 0.165); }
+  add(g, sph(0.03, 10, 8), M.white, 0, 0.455);                                    // little top knot
+  arm(g, -0.19, 0.22, a, a, -0.5, 0.03, 0.03); arm(g, 0.19, 0.22, a, a, 2.4, 0.03, 0.03);
+  for (const s of [-1, 1]) { const f = add(g, sph(0.05, 10, 8), M.white, s * 0.07, 0.025, 0.02); f.scale.set(1, 0.6, 1.3); }
+  return g;
+}
+
+// ── E. Explorer: classic NASA-ish suit, gold reflective visor, mission patch, chunky boots ──
+function explorer(acc) {
+  const g = new THREE.Group(), a = lam(acc), suit = pho('#f1ede6');
+  add(g, cap(0.12, 0.1), suit, 0, 0.25).scale.set(1.12, 1, 1);
+  add(g, box(0.19, 0.22, 0.1), M.metal, 0, 0.28, -0.12);                          // life-support pack
+  add(g, box(0.05, 0.12, 0.02), a, -0.05, 0.3, -0.175); add(g, box(0.05, 0.12, 0.02), a, 0.05, 0.3, -0.175);
+  add(g, new THREE.CircleGeometry(0.032, 16), a, -0.05, 0.31, 0.118);              // mission patch
+  add(g, box(0.09, 0.03, 0.02), M.metal, 0.03, 0.22, 0.115);                        // chest controls
+  add(g, new THREE.TorusGeometry(0.11, 0.025, 8, 24), M.metal, 0, 0.37).rotation.x = Math.PI / 2; // neck ring
+  add(g, sph(0.155), suit, 0, 0.48);
+  add(g, sph(0.125), M.gold, 0, 0.485, 0.065, 1, 0.82, 0.78);
+  add(g, sph(0.03, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffffff' }), -0.05, 0.53, 0.155).scale.set(1, 0.5, 0.3); // glint
+  for (const s of [-1, 1]) add(g, new THREE.CylinderGeometry(0.02, 0.02, 0.03, 10), M.metal, s * 0.15, 0.5).rotation.z = Math.PI / 2;
+  arm(g, -0.145, 0.33, suit, a, -0.25, 0.09, 0.038); arm(g, 0.145, 0.33, suit, a, 2.5, 0.09, 0.038);
+  for (const s of [-1, 1]) { add(g, cap(0.046, 0.05), suit, s * 0.058, 0.12); const b = add(g, box(0.085, 0.06, 0.12), M.dark, s * 0.058, 0.03, 0.012); }
+  return g;
+}
+
+// ── F. Plush bear: felt suit with bear-ear helmet bumps, stitched seams, button eyes ──
+function plush(acc) {
+  const g = new THREE.Group(), a = lam(acc), felt = lam('#f7efe4');
+  add(g, cap(0.12, 0.07), felt, 0, 0.24).scale.set(1.1, 1, 1);
+  add(g, sph(0.07, 12, 10), a, 0, 0.24, 0.085).scale.set(1, 1, 0.4);               // tummy patch
+  add(g, sph(0.165, 16, 12), felt, 0, 0.46);
+  for (const s of [-1, 1]) { add(g, sph(0.055, 12, 10), felt, s * 0.11, 0.59); add(g, sph(0.032, 10, 8), a, s * 0.11, 0.59, 0.03).scale.set(1, 1, 0.5); }
+  add(g, sph(0.11, 16, 12), M.visor, 0, 0.45, 0.085, 1.05, 0.75, 0.62);
+  for (const s of [-1, 1]) add(g, sph(0.019, 10, 8), M.eye, s * 0.042, 0.455, 0.15);
+  add(g, new THREE.TorusGeometry(0.15, 0.004, 4, 30), M.dark, 0, 0.46).rotation.y = Math.PI / 2;  // stitch seam
+  arm(g, -0.14, 0.31, felt, a, -0.3, 0.07, 0.04); arm(g, 0.14, 0.31, felt, a, 2.5, 0.07, 0.04);
+  leg(g, -0.06, felt, a, 0.04, 0.047); leg(g, 0.06, felt, a, 0.04, 0.047);
+  return g;
+}
+
+const DESIGNS = [
+  ['A · Classic', "today's crew, refined", classic, '#3987e5'],
+  ['B · Bubble buddy', 'glass fishbowl, little creature inside', bubble, '#199e70'],
+  ['C · Retro tin bot', 'boxy, rivets, dish ears', retro, '#d95926'],
+  ['D · Mochi', 'one soft gumdrop in the project colour', mochi, '#d55181'],
+  ['E · Explorer', 'NASA-style suit, gold visor, patch', explorer, '#c98500'],
+  ['F · Plush bear', 'felt suit, bear ears, stitches', plush, '#9085e9'],
+];
+
+const ground = new THREE.Mesh(new THREE.SphereGeometry(3, 48, 24), lam('#a6d98f'));
+DESIGNS.forEach(([title, sub, make, acc], i) => {
+  const col = i % COLS, row = Math.floor(i / COLS);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xfff4e0, 0x7d70b8, 1.35));
+  const sun = new THREE.DirectionalLight(0xfff0dc, 2.0); sun.position.set(2, 3, 3); scene.add(sun);
+  const g1 = ground.clone(); g1.position.y = -3; scene.add(g1);
+  const bot = make(acc); bot.rotation.y = 0.32; scene.add(bot);
+  const cam = new THREE.PerspectiveCamera(30, CW / CH, 0.01, 50);
+  cam.position.set(0.38, 0.6, 1.55); cam.lookAt(0, 0.31, 0);
+  const x = col * CW, y = (ROWS - 1 - row) * CH;
+  renderer.setViewport(x, y, CW, CH); renderer.setScissor(x, y, CW, CH);
+  renderer.setClearColor(row ? 0x1b1838 : 0x1e1b3d, 1);
+  renderer.render(scene, cam);
+  const lab = document.createElement('div');
+  lab.className = 'lab'; lab.style.left = `${col * CW}px`; lab.style.top = `${row * CH + CH - 64}px`;
+  lab.innerHTML = `<b>${title}</b><span>${sub}</span>`;
+  document.getElementById('wrap').append(lab);
+});
+window.__done = true;
+</script>
+</body>
+</html>
