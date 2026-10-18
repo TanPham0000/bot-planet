@@ -29,7 +29,7 @@ const notified = new Map();       // session id → `since` of the help request 
 
 // ── prefs ────────────────────────────────────────────────────────────────────
 const prefsFile = () => path.join(app.getPath('userData'), 'prefs.json');
-let prefs = { sound: true, notifications: true, ticker: true };
+let prefs = { sound: true, notifications: true, ticker: true, privacy: false };
 function loadPrefs() {
   try { prefs = { ...prefs, ...JSON.parse(fs.readFileSync(prefsFile(), 'utf8')) }; } catch {}
 }
@@ -224,6 +224,27 @@ ipcMain.on('set-hold', (_e, on) => { state.hold = !!on; log('set-hold', state.ho
 ipcMain.on('set-pinned', (_e, on) => { state.pinned = !!on; log('set-pinned', state.pinned); });
 ipcMain.on('copy', (_e, text) => clipboard.writeText(String(text ?? '')));
 ipcMain.on('focus', () => { if (win && !win.isDestroyed()) { win.setIgnoreMouseEvents(false); win.focus(); } });
+// Jump to an agent: only Claude desktop links (claude://…) may be opened from the page.
+ipcMain.on('open-external', (_e, url) => {
+  const u = String(url || '');
+  if (/^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(u)) shell.openExternal(u);
+});
+ipcMain.on('open-crew', () => openCrew());
+
+// ── Crew manager: a normal window with the full overview ─────────────────────
+let crewWin = null;
+function openCrew() {
+  if (crewWin && !crewWin.isDestroyed()) { crewWin.show(); crewWin.focus(); return; }
+  crewWin = new BrowserWindow({
+    width: 1100, height: 760, minWidth: 820, minHeight: 560,
+    title: 'Bot Planet — Crew', backgroundColor: '#14122a', titleBarStyle: 'hiddenInset',
+    webPreferences: { preload: path.join(DIR, 'preload.cjs') },
+  });
+  crewWin.loadURL(`http://localhost:${PORT}/crew.html`);
+  crewWin.on('closed', () => { crewWin = null; });
+  if (process.platform === 'darwin') app.dock?.show(); // a real window deserves a Dock icon while it's open
+  crewWin.on('closed', () => { if (process.platform === 'darwin') app.dock?.hide(); });
+}
 // Weekly postcard: PNG data URL → ~/Downloads/bot-planet-postcard-YYYY-MM-DD.png (never overwrites), shown in Finder.
 ipcMain.handle('save-postcard', async (_e, dataUrl) => {
   const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl ?? ''));
@@ -323,11 +344,13 @@ function buildMenu() {
     ...(rows.length ? rows : [{ label: 'No astronauts yet', enabled: false }]),
     { type: 'separator' },
     { label: 'Open planet', click: openPanel },
+    { label: 'Crew manager…', click: () => openCrew() },
     { label: 'Weekly recap 📒', click: () => { openPanel(); win?.webContents.send('focus-agent', '@logbook'); } },
     { label: 'Weekly postcard 📮', click: () => { openPanel(); win?.webContents.send('focus-agent', '@postcard'); } },
     { label: 'Schedule 📡', click: () => { openPanel(); win?.webContents.send('focus-agent', '@schedule'); } },
     { label: 'Send a test wave 👋', click: testWave },
     { type: 'separator' },
+    { label: 'Privacy mode (hide tasks & files)', type: 'checkbox', checked: !!prefs.privacy, click: (i) => { setPref('privacy', i.checked); srv?.setPrivacy?.(i.checked); } },
     { label: 'Sound', type: 'checkbox', checked: prefs.sound, click: (i) => setPref('sound', i.checked) },
     { label: 'Live ticker in the notch', type: 'checkbox', checked: prefs.ticker, click: (i) => setPref('ticker', i.checked) },
     { label: 'Notifications', type: 'checkbox', checked: prefs.notifications, click: (i) => setPref('notifications', i.checked) },
@@ -357,6 +380,7 @@ else {
     app.dock?.hide();
     loadPrefs();
     srv = startServer({ onChange: onSessions, statePath: path.join(app.getPath('userData'), 'sessions.json'), seedTranscripts: true, villageCache: path.join(app.getPath('userData'), 'village.json'), namesPath: path.join(app.getPath('userData'), 'names.json'), routinesPath: path.join(app.getPath('userData'), 'routines.json') });
+    srv?.setPrivacy?.(!!prefs.privacy);
     srv.server.on('error', (err) => {
       // Another Bot Planet (or `npm run serve`) already owns the port: show its page, skip native notifications.
       if (err.code === 'EADDRINUSE') { srv = null; console.warn(`Port ${PORT} in use; using the existing server.`); }

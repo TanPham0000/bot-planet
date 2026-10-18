@@ -7,7 +7,8 @@ const MARK = 'bot-planet';
 const settingsFile = () => path.join(process.env.BOT_PLANET_SETTINGS || path.join(os.homedir(), '.claude', 'settings.json'));
 const port = () => Number(process.env.BOT_PLANET_PORT) || 4711;
 // Fire-and-forget: 1s cap, never fails, never prints — Claude is unaffected when the widget is closed.
-const command = () => `curl -s -m 1 -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:${port()}/event >/dev/null 2>&1 || true # ${MARK}`;
+// X-Host-Session: the Claude desktop app's own session id (set in the hook's environment) → "Open in Claude" links
+const command = () => `curl -s -m 1 -X POST -H 'Content-Type: application/json' -H "X-Host-Session: \${CLAUDE_CODE_HOST_SESSION_ID:-}" --data-binary @- http://127.0.0.1:${port()}/event >/dev/null 2>&1 || true # ${MARK}`;
 
 export const HOOK_EVENTS = [
   'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification',

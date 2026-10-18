@@ -11,7 +11,8 @@ import { createUI } from './ui.js';
 import { createVillage, levelOf, LEVEL_NAMES, LEVELS } from './village.js';
 import { fetchLogbook, renderHouse, renderRecap, weekId } from './logbook.js';
 import { createSatellites, renderSchedule, shortName, relTime } from './routines.js';
-import { assignColors, colorFor } from './colors.js';
+import { assignColors, colorFor, setCustom } from './colors.js';
+import * as LandmarkMod from './landmarks.js';
 import { createLandmarks } from './landmarks.js';
 import { makePostcard } from './postcard.js';
 
@@ -53,7 +54,8 @@ camera.position.copy(HOME);
 scene.add(camera);
 
 // Lights ride with the camera: whichever side you orbit to is the sunny side.
-scene.add(new THREE.HemisphereLight(0xfff4e0, 0x7d70b8, 1.35));
+const hemi = new THREE.HemisphereLight(0xfff4e0, 0x7d70b8, 1.35);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff0dc, 2.0);
 sun.position.set(6, 7, 5);
 camera.add(sun);
@@ -120,8 +122,8 @@ function openBusyList() {
     ${list.length ? `<ul class="sched busy">${list.map((a) => `
       <li data-agent="${escapeHtml(a.id)}" class="${a.data.status === 'help' ? 'running' : ''}">
         <i style="background:${a.accent}"></i>
-        <div class="what"><b>${escapeHtml(a.data.name || a.data.project)}</b><small>${escapeHtml(a.data.detail && !a.data.manual ? `${describe(a.data)} · ${a.data.detail}` : describe(a.data))}</small></div>
-        <div class="when"><b>${a.data.status === 'help' ? 'needs you' : ago(a.data.since)}</b><small>${a.data.manual ? 'marked by you' : escapeHtml(a.data.task || '')}</small></div>
+        <div class="what"><b>${escapeHtml(a.data.name || a.data.project)}</b><small>${escapeHtml(privacy ? describe(a.data).split(' · ')[0] : a.data.detail && !a.data.manual ? `${describe(a.data)} · ${a.data.detail}` : describe(a.data))}</small></div>
+        <div class="when"><b>${a.data.status === 'help' ? 'needs you' : a.stuck ? '💧 stuck?' : ago(a.data.since)}</b><small>${a.data.manual ? 'marked by you' : privacy ? '' : escapeHtml(a.data.task || '')}</small></div>
       </li>`).join('')}</ul>` : '<p class="sub">Nobody is working right now. Everyone is resting at camp or at home.</p>'}`);
 }
 
@@ -174,6 +176,35 @@ function openSchedule(highlight = null) {
     ? renderSchedule(routinesSnap, { highlight })
     : '<p class="sub">No scheduled routines yet. Ask Claude to refresh the Bot Planet routines snapshot.</p>');
 }
+// failed routines: tell you once per failed run
+const alertedFails = new Set();
+function checkRoutineFailures() {
+  for (const sat of sats.sats.values()) {
+    const r = sat.r, st = sat.state || {};
+    const failed = st.failed || r.lastRun?.status === 'failed';
+    const key = r.id + ':' + (r.lastRun?.at || '');
+    if (!failed || alertedFails.has(key)) continue;
+    alertedFails.add(key);
+    ui.ticker({ name: '📡 ' + shortName(r.name), detail: 'last run failed' }, '⚠️', '#e66767', { force: true });
+    ui.toast?.(`⚠️ Routine "${shortName(r.name)}" failed its last run`);
+  }
+}
+setInterval(checkRoutineFailures, 60000);
+
+// day & night follow your clock (lights, sky, lit windows)
+function nightFactor(d = new Date()) {
+  const h = d.getHours() + d.getMinutes() / 60;
+  const ramp = (a, b, x) => Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return h < 12 ? 1 - ramp(6, 8, h) : ramp(19, 21.5, h); // dawn 6–8, dusk 19–21:30
+}
+function applyClock() {
+  const now = new Date();
+  W.setTimeOfDay?.(now, { sun, rim, hemi });
+  village.setNight?.(nightFactor(now));
+  wake(300);
+}
+setInterval(applyClock, 60000);
+
 // every 15s: who just started? (no rendering needed for this)
 setInterval(() => {
   for (const r of sats.refresh()) {
@@ -229,10 +260,20 @@ async function refreshActivity() {
 
 let villageSeen = false;
 let lastVillage = null, coworkGroups = [], names = {};
+// v4: custom looks/spots from the crew manager, privacy, plan usage, first-seen projects
+let custom = {}, privacy = false, seenProjects = {};
+const hiddenName = (n) => !!custom[String(n || '').trim().toLowerCase()]?.hidden;
+const postedSeen = new Set();
+function reportSeen() {
+  const fresh = [...village.plots.keys()].filter((k) => !seenProjects[k] && !postedSeen.has(k));
+  if (!fresh.length) return;
+  fresh.forEach((k) => postedSeen.add(k));
+  fetch('/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys: fresh }) }).catch(() => {});
+}
 function syncVillage(v) {
   if (v) lastVillage = v;
   if (!lastVillage && !coworkGroups.length) return;
-  const opts = { animate: villageSeen, cowork: coworkGroups, names, activity };
+  const opts = { animate: villageSeen, cowork: coworkGroups, names, activity, custom };
   const grew = village.update(lastVillage, opts);
   // colours stick to projects (biggest first get one); then repaint roofs + continents
   const byTurns = [...village.plots.values()].sort((a, b) => (b.turns || 0) - (a.turns || 0)).map((p) => p.name);
@@ -242,6 +283,7 @@ function syncVillage(v) {
   landmarks.update([...village.plots.values()].filter((p) => !p.vanishing)
     .map((p) => ({ key: p.key, name: p.name, dir: p.dir, level: p.level, color: colorFor(p.name) || p.color || '#d97757' })));
   syncContinentLabels();
+  reportSeen();
   villageSeen = true;
   if (grew.length) { ui.sfx('chime'); wake(2500); }
 }
@@ -379,10 +421,16 @@ function connect() {
     names = msg.names || {};
     coworkGroups = foldCowork(msg.cowork?.groups || []);
     coworkWork = msg.work || {};
+    custom = msg.custom || {};
+    seenProjects = msg.seenProjects || {};
+    if (setCustom(custom)) { (LandmarkMod.setCustom || LandmarkMod.setCustomThemes || (() => {}))(custom); }
+    privacy = !!msg.privacy;
+    ui.setPrivacy?.(privacy);
+    ui.setUsage?.(msg.usage);
     coworkSeen = msg.coworkSeen || {};
     scheduleActivity();
-    if (msg.routines) { routinesSnap = msg.routines; sats.update(routinesSnap.routines); sats.refresh(); }
-    const crew = live.concat(coworkCrew(coworkGroups));
+    if (msg.routines) { routinesSnap = msg.routines; sats.update(routinesSnap.routines); sats.refresh(); if (!firstSync) checkRoutineFailures(); }
+    const crew = live.concat(coworkCrew(coworkGroups)).filter((s) => !hiddenName(s.name));
     if (crew.length && !forceDemo) { stopDemo(); syncVillage(msg.village); sync(crew); }
     else { startDemo(); coworkGroups = []; syncVillage(forceDemo || !msg.village?.projects?.length ? demoVillage() : msg.village); sync(demo.map((d) => ({ ...d }))); }
   };
@@ -833,6 +881,7 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 // Speech bubbles: whoever is hovered/selected, anyone asking for you, plus the 3 freshest bits of news.
 const SPEECH_MS = 4500;
 function whoSpeaks(crew) {
+  if (privacy) return new Set(); // privacy mode: no file names or commands floating around
   const now = Date.now();
   const ids = new Set();
   if (hovered) ids.add(hovered);
@@ -860,6 +909,8 @@ setInterval(() => {
 }, 10000);
 
 connect();
+applyClock();
+setTimeout(checkRoutineFailures, 4000);
 wake(1000);
 
 // Debug handle for the console / automated checks

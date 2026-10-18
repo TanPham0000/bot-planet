@@ -132,6 +132,8 @@ function applyHook(sessions, evt, now = Date.now()) {
 
   const s = sessions.get(id) ?? newSession(id);
   if (evt.cwd) { s.cwd = String(evt.cwd); s.project = path.basename(s.cwd) || s.project; }
+  // the Claude desktop app's own id for this session (from the hook's environment) → "Open in Claude" links
+  if (typeof evt.__hostId === 'string' && /^local_[0-9a-f-]{36}$/.test(evt.__hostId)) s.hostId = evt.__hostId;
   if (evt.transcript_path) s.transcript = String(evt.transcript_path);
 
   const tool = evt.tool_name ? String(evt.tool_name) : '';
@@ -354,12 +356,18 @@ export function startServer({ port = PORT, onChange, statePath, seedTranscripts,
   let work = {};
   // When Bot Planet first saw each Cowork session (Cowork gives no timestamps) → recency for footprints
   let seen = {};
+  // v4: per-project custom looks/spots (crew manager), project first-seen + reviewed stamps
+  let custom = {}, seenProjects = {}, reviewed = {};
+  let privacy = false;
   if (namesPath) {
     try {
       const j = JSON.parse(fs.readFileSync(namesPath, 'utf8'));
       if (j?.names && typeof j.names === 'object') for (const [k, v] of Object.entries(j.names)) if (typeof v === 'string' && v) names[k] = v;
       if (j?.assign && typeof j.assign === 'object') for (const [k, v] of Object.entries(j.assign)) if (typeof v === 'string' && v) assign[k] = v;
       if (j?.seen && typeof j.seen === 'object') for (const [k, v] of Object.entries(j.seen)) if (typeof v === 'number') seen[k] = v;
+      if (j?.custom && typeof j.custom === 'object') custom = j.custom;
+      if (j?.seenProjects && typeof j.seenProjects === 'object') seenProjects = j.seenProjects;
+      if (j?.reviewed && typeof j.reviewed === 'object') reviewed = j.reviewed;
       if (j?.work && typeof j.work === 'object') for (const [k, v] of Object.entries(j.work)) if (v && typeof v.since === 'number') work[k] = { label: String(v.label || '').slice(0, 60), since: v.since };
     } catch {}
   }
@@ -369,7 +377,7 @@ export function startServer({ port = PORT, onChange, statePath, seedTranscripts,
     if (!namesPath) return;
     try {
       const tmp = `${namesPath}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify({ names, assign, work, seen }));
+      fs.writeFileSync(tmp, JSON.stringify({ names, assign, work, seen, custom, seenProjects, reviewed }));
       fs.renameSync(tmp, namesPath);
     } catch {}
   };
@@ -430,6 +438,19 @@ export function startServer({ port = PORT, onChange, statePath, seedTranscripts,
     fs.watchFile(routinesPath, { interval: 5000 }, () => { loadRoutines(); changed(); });
   }
 
+  // Plan usage, as the Claude desktop app last recorded it (5-hour and 7-day % used)
+  let usage = null;
+  const USAGE_FILE = path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'plan-usage-history.json');
+  const loadUsage = () => {
+    try {
+      const samples = JSON.parse(fs.readFileSync(USAGE_FILE, 'utf8'))?.samples || [];
+      const last = samples[samples.length - 1];
+      usage = last ? { fiveHour: typeof last.u?.fh === 'number' ? last.u.fh : null, sevenDay: typeof last.u?.sd === 'number' ? last.u.sd : null, at: last.t } : null;
+    } catch { usage = null; }
+  };
+  loadUsage();
+  fs.watchFile(USAGE_FILE, { interval: 15000 }, () => { loadUsage(); changed(); });
+
   const payload = (all) => {
     const o = { sessions: all };
     if (village) o.village = village.data();
@@ -443,6 +464,8 @@ export function startServer({ port = PORT, onChange, statePath, seedTranscripts,
     if (routines) o.routines = routines;
     o.names = names;
     o.work = work;
+    o.custom = custom; o.seenProjects = seenProjects; o.reviewed = reviewed;
+    o.usage = usage; o.privacy = privacy;
     return JSON.stringify(o);
   };
   const changed = () => {
@@ -510,9 +533,41 @@ export function startServer({ port = PORT, onChange, statePath, seedTranscripts,
       }
     }
 
+    // v4: crew manager customisations + what's-new bookkeeping
+    if (req.method === 'POST' && (url.pathname === '/custom' || url.pathname === '/seen' || url.pathname === '/reviewed')) {
+      readBody(req, (body) => {
+        let j = null;
+        try { j = JSON.parse(body); } catch {}
+        const okKey = (k) => typeof k === 'string' && k.length > 0 && k.length <= 80;
+        if (url.pathname === '/custom') {
+          if (!okKey(j?.key) || !j.patch || typeof j.patch !== 'object') { res.writeHead(400).end(); return; }
+          const cur = { ...(custom[j.key] || {}) };
+          const allowed = { color: 'string', hat: 'string', theme: 'string', spot: 'object', hidden: 'boolean' };
+          for (const [f, v] of Object.entries(j.patch)) {
+            if (!(f in allowed)) continue;
+            if (v === null) delete cur[f];
+            else if (f === 'spot') { if (Array.isArray(v) && v.length === 3 && v.every(Number.isFinite)) cur.spot = v.map(Number); }
+            else if (typeof v === allowed[f]) cur[f] = typeof v === 'string' ? v.slice(0, 40) : v;
+          }
+          if (Object.keys(cur).length) custom[j.key] = cur; else delete custom[j.key];
+        } else {
+          const keys = Array.isArray(j?.keys) ? j.keys.filter(okKey).slice(0, 200) : [];
+          const now = Date.now();
+          for (const k of keys) {
+            if (url.pathname === '/seen') { if (!seenProjects[k]) seenProjects[k] = now; }
+            else reviewed[k] = now;
+          }
+        }
+        scheduleNamesSave();
+        changed();
+        res.writeHead(204).end();
+      });
+      return;
+    }
+
     if (req.method === 'POST' && url.pathname === '/event') {
       readBody(req, (body) => {
-        try { inject(JSON.parse(body)); } catch {}
+        try { const evt = JSON.parse(body); evt.__hostId = String(req.headers['x-host-session'] || ''); inject(evt); } catch {}
         res.writeHead(204).end();
       });
       return;
@@ -602,6 +657,7 @@ export function startServer({ port = PORT, onChange, statePath, seedTranscripts,
         return f;
       };
       if (p === '/' || p === '/index.html') file = path.join(DIR, 'index.html');
+      else if (p === '/crew.html') file = path.join(DIR, 'crew.html');
       else if (p.startsWith('/three/')) file = under(THREE_DIR, '/three/');
       else if (p.startsWith('/web/')) file = under(WEB_DIR, '/web/');
       else if (p.startsWith('/assets/')) file = under(ASSETS_DIR, '/assets/');
@@ -628,7 +684,8 @@ export function startServer({ port = PORT, onChange, statePath, seedTranscripts,
     try { server.close(); server.closeAllConnections?.(); } catch {}
   };
 
-  return { server, list, inject, close };
+  const setPrivacy = (on) => { privacy = !!on; changed(); };
+  return { server, list, inject, close, setPrivacy };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

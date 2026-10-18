@@ -232,6 +232,18 @@
   .sched.busy li { cursor: pointer; grid-template-columns: 8px minmax(0, 1fr) minmax(0, 120px); }
   .sched.busy small, .sched.busy b { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   .sched.busy li:hover { background: rgba(217,119,87,.1); }
+  /* plan usage gauge (expanded notch row) */
+  .usage { display: none; align-items: center; gap: 4px; font-size: 10px; font-weight: 800; color: rgba(255,255,255,.85); cursor: default; }
+  .open .usage:not([hidden]) { display: inline-flex; }
+  .open .usage:not([hidden]) ~ .title, .open .title:has(+ .usage:not([hidden])) { display: none; }
+  .usage i { width: 34px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.15); overflow: hidden; display: block; }
+  .usage i span { display: block; height: 100%; border-radius: 3px; background: var(--mint); }
+  .usage.warm i span { background: #ffc96b; } .usage.hot i span { background: var(--orange-hot); }
+  .usage.hot b { color: var(--orange-hot); }
+  #crew { display: none; width: 20px; height: 20px; border: 0; border-radius: 6px; background: rgba(255,255,255,.08); cursor: pointer; padding: 0; font-size: 10px; }
+  .open #crew { display: inline-block; }
+  #crew:hover { background: rgba(255,255,255,.2); }
+  #c-open[hidden] { display: none; }
   #tip { position: fixed; z-index: 9; pointer-events: none; background: #2b2740; color: #fff; font-size: 10.5px; font-weight: 600; padding: 4px 8px; border-radius: 7px; white-space: nowrap; transform: translate(-50%, calc(-100% - 8px)); }
   .board h4 button { border: 0; background: rgba(217,119,87,.18); color: var(--ink); border-radius: 999px; padding: 1px 7px; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
 
@@ -252,6 +264,7 @@
       <div class="ear" id="ear-l">
         <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><circle class="planet" cx="8" cy="10" r="5.6"/><circle cx="8" cy="4.2" r="2.7" fill="#fdfbf7"/><rect x="6.5" y="3.5" width="3" height="1.5" rx=".75" fill="#2a2b45"/><circle cx="8" cy="0.9" r=".9" fill="#d97757"/></svg>
         <span class="title">Bot Planet</span>
+        <span class="usage ok" id="usage" hidden><i><span></span></i><b></b></span>
         <span class="tick" id="tick-name"></span>
       </div>
       <div class="ear" id="ear-r">
@@ -259,6 +272,7 @@
         <span class="counts" id="counts"></span>
         <span class="dots" id="dots"></span>
         <span class="badge" id="badge" hidden></span>
+        <button id="crew" title="Crew manager">👥</button>
         <button id="pin" title="Keep open">📌</button>
       </div>
     </div>
@@ -281,7 +295,7 @@
   <p class="task" id="c-task"></p>
   <p class="subs" id="c-subs"></p>
   <p class="cwd" id="c-cwd"></p>
-  <div class="cmd" id="c-cmd-row"><code id="c-cmd"></code><button id="c-copy">Copy</button></div>
+  <div class="cmd" id="c-cmd-row"><code id="c-cmd"></code><button id="c-copy">Copy</button><button id="c-open" class="primary" hidden>Open ↗</button></div>
   <div class="work" id="c-work-row" hidden><input id="c-work-label" maxlength="60" placeholder="What is it working on? e.g. South Africa proposal" /><button id="c-work-btn" class="primary">▶ Working on it</button></div>
   <div class="move" id="c-move-row" hidden><label for="c-move">Move to project</label><select id="c-move"></select></div>
   <div class="actions" id="c-actions"></div>

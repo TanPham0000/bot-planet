@@ -121,3 +121,52 @@ Days are local-time dates. The per-file cache keeps at most the last 120 days of
 
 ### server.mjs adds
 `GET /logbook?days=14` → `village.logbook({ days })`, with `names` applied (name = names[key] ?? name), as JSON with `Cache-Control: no-cache`. It returns 503 while the first scan is running.
+
+## v4: crew manager, custom looks, jump links, alerts, privacy, usage, day/night
+
+Ownership this round:
+- **Lead:** `server.mjs`, `hooks.mjs`, `main.mjs`, `preload.cjs`, `web/app.js`, `web/ui.js`, `index.html`
+- **Crew session:** `crew.html` (new), `web/crew.js` (new)
+- **Visuals session:** `web/world.js`, `web/village.js`, `web/astronaut.js`, `web/routines.js`, `web/colors.js`, `web/landmarks.js`
+
+`nameKey` = a project's display name, trimmed and lower-cased. Houses, colours and continents are already keyed this way.
+
+### Server → page (SSE additions)
+```ts
+{
+  // …everything from v1–v3, plus:
+  custom: Record<nameKey, {
+    color?: string,          // one of colors.js PALETTE hexes
+    hat?: 'cap'|'beanie'|'crown'|'headphones'|'propeller'|'tophat'|'bow'|'flower',
+    theme?: 'lighthouse'|'printshop'|'server'|'vault'|'windmill',
+    spot?: [number, number, number], // unit vector in planet space: where the project's home/continent sits
+    hidden?: boolean,        // not shown on the planet at all
+  }>,
+  seenProjects: Record<nameKey, number>, // first time Bot Planet saw that project (ms)
+  reviewed: Record<nameKey, number>,     // when you last acknowledged it in the crew manager
+  usage: { fiveHour: number|null, sevenDay: number|null, at: number } | null, // % of plan used, from the Claude app's plan-usage-history.json
+}
+// Session gains: hostId?: string — the Claude desktop session id ('local_…') when the hook ran inside the desktop app.
+```
+### Page → server
+- `POST /custom` with `{ key: nameKey, patch: {...} }` merges the patch. A field set to `null` removes it.
+- `POST /seen` with `{ keys: nameKey[] }` records a first-seen time for unknown keys. It's idempotent, and any page may call it with the project names it knows.
+- `POST /reviewed` with `{ keys: nameKey[] }` stamps those keys as reviewed now. "New" means `seenProjects[k] > (reviewed[k] ?? 0)`.
+- `GET /crew.html` serves the crew manager page.
+
+### Bridge additions (`window.botPlanet`)
+- `openExternal(url)`: only `claude://` links. It opens a desktop session (`claude://claude.ai/epitaxy/<hostId>`).
+- `openCrew()`: opens or focuses the Crew manager window (1100×760, a normal window).
+
+### Renderer contracts (Visuals session exports, Lead wires)
+- `colors.js`: `setCustom(custom)`. It makes `colorFor(name)` honour `custom[nameKey].color` before the sticky assignment.
+- `astronaut.js`:
+  - `hatFor(key)` honours `custom[key].hat`. Export `setCustomLooks(custom)`, or reuse `colors.setCustom`.
+  - Faces with feelings by status: help = worried, done = happy (^ ^), napping = closed, working = focused, idle = normal.
+  - Stuck: working, but `Date.now() - data.updated > 8 min`. It shows a sweat-drop sprite and moves slower, and `Astronaut.stuck` is readable.
+- `landmarks.js`: `themeOf` honours `custom.theme`. Export a setter.
+- `village.js`:
+  - `update(..., { custom })`. `custom.spot` overrides `plotDir` (snapped to land nearby), and `hidden` projects get no plot.
+  - `setNight(k /*0 day … 1 night*/)`: windows of houses whose project is active glow at night.
+- `world.js`: `setTimeOfDay(date)` covers sun colour and intensity, hemisphere tint, and a soft night sky.
+- `routines.js`: a satellite whose `lastRun.status === 'failed'` shows a red light and a red-tinted body.

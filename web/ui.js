@@ -107,6 +107,33 @@ export function createUI(opts, on) {
     if (state !== 'open' && !e.target.closest('#peek')) setState('open');
   });
   $('peek').addEventListener('click', () => { const id = $('peek').dataset.id; setState('open'); if (id) on.focus(id); });
+  $('c-open').addEventListener('click', () => { const l = $('c-open').dataset.link; if (l) bridge?.openExternal?.(l); });
+  $('crew').addEventListener('click', (e) => { e.stopPropagation(); if (bridge?.openCrew) bridge.openCrew(); else window.open('/crew.html', '_blank'); });
+
+  // ── privacy mode & plan usage ──
+  let privacy = false;
+  function setPrivacy(on) {
+    if (privacy === !!on) return;
+    privacy = !!on;
+    body.classList.toggle('privacy', privacy);
+    boardKey = ''; // re-render the camp board
+  }
+  let usageWarned = 0;
+  function setUsage(u) {
+    const el = $('usage');
+    if (!u || (u.fiveHour == null && u.sevenDay == null)) { el.hidden = true; return; }
+    const worst = Math.max(u.fiveHour ?? 0, u.sevenDay ?? 0);
+    el.hidden = false;
+    el.className = 'usage ' + (worst >= 85 ? 'hot' : worst >= 60 ? 'warm' : 'ok');
+    el.querySelector('b').textContent = `${Math.round(worst)}%`;
+    el.querySelector('i span').style.width = `${Math.min(100, worst)}%`;
+    const asOf = u.at ? new Date(u.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '?';
+    el.title = `Plan usage — 5-hour: ${u.fiveHour ?? '–'}% · 7-day: ${u.sevenDay ?? '–'}% (as of ${asOf}, from the Claude app)`;
+    const level = worst >= 95 ? 2 : worst >= 80 ? 1 : 0;
+    if (level > usageWarned) toast?.(level === 2 ? `⛽ ${Math.round(worst)}% of your plan used — nearly at the limit` : `⛽ ${Math.round(worst)}% of your plan used`);
+    usageWarned = level;
+  }
+
   $('pin').addEventListener('click', (e) => {
     e.stopPropagation();
     pinned = !pinned;
@@ -212,12 +239,16 @@ export function createUI(opts, on) {
     const st = $('c-status');
     st.className = 'status ' + d.status;
     st.textContent = `${describe(d)} · ${ago(d.since)}`;
-    $('c-msg').textContent = d.status === 'help' || d.status === 'done' ? d.message || '' : '';
+    $('c-msg').textContent = privacy ? (d.status === 'help' ? 'Needs your attention' : '') : d.status === 'help' || d.status === 'done' ? d.message || '' : '';
     const task = d.task || d.title;
-    $('c-task').textContent = task ? `“${task}”` : '';
+    $('c-task').textContent = privacy ? '' : task ? `“${task}”` : '';
     const subs = d.subagents || [];
     $('c-subs').textContent = subs.length ? `🛰️ ${subs.length} helper${subs.length > 1 ? 's' : ''}: ${subs.map((s) => s.description).join(' · ')}` : '';
-    $('c-cwd').textContent = d.cowork ? (d.folders || []).slice(0, 2).join(' · ') : d.cwd || '';
+    $('c-cwd').textContent = privacy ? '' : d.cowork ? (d.folders || []).slice(0, 2).join(' · ') : d.cwd || '';
+    // jump straight into the session in the Claude app when we know its desktop id
+    const link = d.hostId && !d.demo ? `claude://claude.ai/epitaxy/${d.hostId}` : '';
+    $('c-open').hidden = !link || !bridge?.openExternal;
+    $('c-open').dataset.link = link;
     $('c-cmd').textContent = d.demo ? 'claude --resume (demo)' : `cd ${JSON.stringify(d.cwd || '.')} && claude --resume ${d.id}`;
     $('c-cmd-row').hidden = !!d.cowork;
     $('c-move-row').hidden = !d.cowork;
@@ -266,7 +297,7 @@ export function createUI(opts, on) {
     board.querySelector('ul').innerHTML = resting.map((s) => {
       const napping = Date.now() - s.since > SLEEP_MS;
       const color = napping ? '#b9b3cc' : STATUS_COLOR[s.status];
-      const note = (s.status === 'done' && !napping ? '✓ ' : napping ? '💤 ' : '') + (s.task || s.title || 'no task yet');
+      const note = (s.status === 'done' && !napping ? '✓ ' : napping ? '💤 ' : '') + (privacy ? (s.status === 'done' ? 'your turn' : 'resting') : s.task || s.title || 'no task yet');
       return `<li data-id="${esc(s.id)}"><i style="background:${color}"></i><b>${esc(s.name || s.project)}</b><small>${esc(note)}</small></li>`;
     }).join('');
     return resting.length;
@@ -306,7 +337,7 @@ export function createUI(opts, on) {
         const s = newHelp[0];
         $('peek').dataset.id = s.id;
         $('peek-who').textContent = s.name || s.project;
-        $('peek-what').textContent = s.message || 'needs your attention';
+        $('peek-what').textContent = privacy ? 'needs your attention' : s.message || 'needs your attention';
         setState('peek');
         clearTimeout(peekTimer);
         peekTimer = setTimeout(() => { if (state === 'peek') setState('collapsed'); }, 6000);
@@ -327,8 +358,9 @@ export function createUI(opts, on) {
   let lastTick = 0, tickTimer = 0;
   let tickerOn = opts.ticker !== false;
   bridge?.onPrefs?.((p) => { if (p.ticker !== undefined) tickerOn = !!p.ticker; });
-  function ticker(s, emoji, accent) {
-    if (!notch || !tickerOn || state !== 'collapsed' || alert || document.hidden) return;
+  function ticker(s, emoji, accent, { force = false } = {}) {
+    if (!notch || (!tickerOn && !force) || state !== 'collapsed' || (alert && !force) || document.hidden) return;
+    if (privacy && !force) return; // no file names or commands in the notch
     const now = Date.now();
     if (now - lastTick < 7000) return;
     lastTick = now;
@@ -380,7 +412,7 @@ export function createUI(opts, on) {
 
   apply();
   return {
-    openLog, closeLog, toast,
+    openLog, closeLog, toast, setPrivacy, setUsage,
     ticker,
     get state() { return state; },
     get pointer() { return pointer; },
