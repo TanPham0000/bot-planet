@@ -47,9 +47,9 @@ const sats = createSatellites({ world: W.world, scene });
 const now = Date.now();
 const V = { projects: [
   { key: '/a/bot-planet', name: 'bot-planet', turns: 300, edits: 200, lastAt: now - 3600e3 },
-  { key: '/a/outreach', name: 'PHAM outreach', turns: 120, edits: 60, lastAt: now - 3 * 86400e3 },
+  { key: '/a/outreach', name: 'Newsletter', turns: 120, edits: 60, lastAt: now - 3 * 86400e3 },
   { key: '/a/garden', name: 'Garden journal', turns: 45, edits: 30, lastAt: now - 2 * 3600e3 },
-  { key: '/a/fact', name: 'Facturen', turns: 20, edits: 10, lastAt: now - 5 * 86400e3 },
+  { key: '/a/fact', name: 'Invoices', turns: 20, edits: 10, lastAt: now - 5 * 86400e3 },
   { key: '/a/secret', name: 'Secret thing', turns: 60, edits: 10, lastAt: now - 3600e3 },
 ] };
 let customObj = {};
@@ -67,8 +67,8 @@ const env = {
   seatDir: (i) => W.seats[Math.max(0, i)].dir, homeDir: (n) => village.homeOf(n), homeSpot: (n, i) => village.homeSpot(n, i),
 };
 const STAT = [
-  ['idle', 'bot-planet', now - 60e3], ['working', 'bot-planet', now - 60e3], ['help', 'PHAM outreach', now - 60e3],
-  ['done', 'Garden journal', now - 60e3], ['idle', 'Facturen', now - 30 * 60e3], ['working', 'Garden journal', now - 12 * 60e3],
+  ['idle', 'bot-planet', now - 60e3], ['working', 'bot-planet', now - 60e3], ['help', 'Newsletter', now - 60e3],
+  ['done', 'Garden journal', now - 60e3], ['idle', 'Invoices', now - 30 * 60e3], ['working', 'Garden journal', now - 12 * 60e3],
 ];
 const agents = STAT.map(([status, name, t], i) => {
   const a = new Astronaut({ id: 's' + i, name, status, tool: status === 'working' ? 'Read' : '', since: t, updated: t, subagents: [] }, env, offsetDir(W.campDir, i, 0.2));

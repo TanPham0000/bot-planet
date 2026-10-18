@@ -22,9 +22,9 @@ const HAT_INFO = { cap: ['🧢', 'Cap'], beanie: ['🧶', 'Beanie'], crown: ['�
 const THEME_INFO = { lighthouse: ['🗼', 'Lighthouse'], printshop: ['🖨️', 'Print shop'], server: ['🖥️', 'Server'], vault: ['🏦', 'Vault'], windmill: ['🌾', 'Windmill'] };
 const STATUS = { help: ['needs you', 0], working: ['working', 1], done: ['your turn', 2], idle: ['idle', 3] };
 const MAX_PLOTS = 14, IDLE_DAYS = 60; // same as village.js
-// Projects Tân sorts Cowork chats into; offered under "New project" until they exist. Folder hints suggest one.
-const STARTERS = ['Proposals', 'Facturen', 'Slush', 'Future ready'];
-const FOLDER_HINTS = [[/\/financ|factu|invoice|boekhoud/i, 'Facturen'], [/proposal|offerte|quote/i, 'Proposals'], [/slush/i, 'Slush'], [/future.?ready/i, 'Future ready']];
+// Starter projects to sort Cowork chats into; offered under "New project" until they exist. Folder hints suggest one.
+const STARTERS = ['Proposals', 'Invoices', 'Research', 'Website'];
+const FOLDER_HINTS = [[/\/financ|factu|invoice|boekhoud/i, 'Invoices'], [/proposal|offerte|quote/i, 'Proposals'], [/research/i, 'Research'], [/site|web/i, 'Website']];
 
 // ── state ─────────────────────────────────────────────────────────────
 const S = { sessions: [], village: null, cowork: [], sessionFolders: {}, coworkSeen: {}, names: {}, custom: {}, seen: {}, reviewed: {}, work: {}, usage: null, usageHistory: [], privacy: false, logbook: null, connected: false, got: false };
@@ -567,7 +567,7 @@ function agentCard(a) {
   const p = byKey.get(a.projectKey);
   const color = p ? lookOf(p).color : '#b9b3cc';
   const foot = newFor === a.id
-    ? `<span class="newp"><input class="field-in" data-newname="${esc(a.id)}" placeholder="Project name, e.g. Facturen" maxlength="40" /><button class="btn small primary" data-newok="${esc(a.id)}">Create</button><button class="btn small ghost" data-newcancel>✕</button></span>`
+    ? `<span class="newp"><input class="field-in" data-newname="${esc(a.id)}" placeholder="Project name, e.g. Invoices" maxlength="40" /><button class="btn small primary" data-newok="${esc(a.id)}">Create</button><button class="btn small ghost" data-newcancel>✕</button></span>`
     : `<select class="field-in move" data-move="${esc(a.id)}" aria-label="Move ${esc(a.name)} to a project">${moveOptions(a)}</select>
        <span class="when" title="${a.lastLabel === 'seen' ? 'First seen by Bot Planet' : 'Last activity'}">${a.lastLabel === 'seen' && a.last ? 'seen ' + ago(a.last) : ago(a.last)}</span>`;
   const sub = a.detail ? priv(a.detail) : a.kind === 'cowork' ? 'Cowork reports no live status' : '&nbsp;';

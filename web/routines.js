@@ -59,7 +59,7 @@ export function nextRun(expr, tz, from = Date.now()) {
 }
 
 // ── wording ──────────────────────────────────────────────────────────
-export const shortName = (n) => String(n).replace(/^PHAM\s+(Outreach|Rhythm)\s*[:—-]\s*/i, '').replace(/\s*\(.*\)\s*$/, '');
+export const shortName = (n) => String(n).replace(/^[^:—]{2,24}\s+(Outreach|Rhythm)\s*[:—-]\s*/i, '').replace(/\s*\(.*\)\s*$/, '');
 const hhmm = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 /** "weekdays · 09:00, 14:00" in *your* local time, read off the next fires. */

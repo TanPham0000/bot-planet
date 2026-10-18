@@ -76,7 +76,7 @@ Without `window.botPlanet` (a plain browser), the page handles hover itself, so 
 type CoworkGroup = {
   key: string;          // 'space:<spaceId>' or 'folder:<abs path>' (sessions with no Cowork project)
   name: string;         // names[key] ?? defaultName
-  defaultName: string;  // basename of the group's most common folder ("PHAM. Creative", "OUTREACH")
+  defaultName: string;  // basename of the group's most common folder ("Studio", "Newsletter")
   named: boolean;       // true when the user has named it
   sessions: string[];   // remote Cowork session ids (session_01…), after user re-assignments
   folders: string[];    // distinct folders, most common first

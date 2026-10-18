@@ -226,7 +226,7 @@ export async function makePostcard({ renderer, scene, camera, logbook = null, pa
   g.textAlign = 'center';
   g.fillStyle = 'rgba(255, 255, 255, 0.42)';
   g.font = font(600, 24);
-  g.fillText('made with Claude · PHAM. Creative', W / 2, H - 34);
+  g.fillText('made with Claude · Bot Planet', W / 2, H - 34);
 
   return c.toDataURL('image/png');
 }

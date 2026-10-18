@@ -291,7 +291,7 @@ function syncVillage(v) {
 /**
  * Cowork sessions outside a Cowork project are grouped by folder, which gives lots of tiny groups.
  * Fold each one-session folder group (that you haven't named) into the group owning its parent
- * folder, e.g. "Projects/Maria 01" → "Projects". Groups that end up with the same name share a house.
+ * folder, e.g. "Projects/Client A" → "Projects". Groups that end up with the same name share a house.
  */
 function foldCowork(groups) {
   const out = groups.map((g) => ({ ...g, sessions: [...g.sessions], folders: [...(g.folders || [])] }));
@@ -369,19 +369,19 @@ let current = [];
 const forceDemo = params.has('demo');
 
 const DEMO_CREW = [
-  ['phamcreative-site', 'Tighten the /helsinki hero spacing', 'working', 'Edit'],
-  ['medieval-rts', 'Pathfinding for cavalry units', 'help', ''],
-  ['taste-shift', 'Stage 4: drift timeline chart', 'working', 'Bash'],
-  ['sticker-smash', 'Render the promo video frames', 'done', ''],
-  ['linkedin-network', 'Cluster labels overlap fix', 'idle', ''],
+  ['portfolio-site', 'Tighten the hero spacing', 'working', 'Edit'],
+  ['tower-defense', 'Pathfinding for flying units', 'help', ''],
+  ['music-stats', 'Drift timeline chart', 'working', 'Bash'],
+  ['sticker-game', 'Render the promo video frames', 'done', ''],
+  ['network-map', 'Cluster labels overlap fix', 'idle', ''],
   ['bot-planet', 'Notch island + camp board', 'working', 'Task'],
-  ['pham-outreach', 'Draft Slush follow-ups', 'working', 'WebSearch'],
-  ['knowledge', 'Update pricing rules', 'done', ''],
-  ['castle-tracker', 'Fix the save-slot bug', 'working', 'Read'],
+  ['newsletter', 'Draft the conference follow-ups', 'working', 'WebSearch'],
+  ['notes', 'Tidy the reading list', 'done', ''],
+  ['garden-journal', 'Fix the save-slot bug', 'working', 'Read'],
 ];
 const DEMO_TOOLS = ['Edit', 'Bash', 'Read', 'Grep', 'WebSearch', 'TodoWrite', 'Task', 'Write', 'mcp__figma__get_screenshot', ''];
 const DEMO_DETAIL = {
-  Edit: 'hero.tsx', Bash: 'npm test', Read: 'README.md', Grep: '“notch”', WebSearch: '“slush 2026 exhibitors”',
+  Edit: 'hero.tsx', Bash: 'npm test', Read: 'README.md', Grep: '“notch”', WebSearch: '“conference 2026 speakers”',
   TodoWrite: 'Wiring the camp board', Task: 'Explore the repo', Write: 'village.mjs', mcp__figma__get_screenshot: 'figma: get_screenshot',
 };
 const DEMO_ASKS = ['Claude needs your permission to use Bash', 'Has a question for you', 'Wants you to approve a plan', 'Claude needs your permission to use Write'];

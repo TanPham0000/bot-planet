@@ -24,7 +24,7 @@ A cozy low-poly planet that lives in your MacBook's camera notch. Hover the notc
 Open it with 👥 in the notch or from the menu-bar icon: a full window for sorting out your crew.
 
 - **Projects:** every project Bot Planet knows about. Pick its colour (one of 8 presets or any colour you like), hat and landmark, place it on a small globe, hide it, or remove it (with undo). Removing never touches your files or chats.
-- **Agents:** a grid of every agent as a 3D portrait, showing what it's doing. Name agents, or move them into a project, including new ones like "Proposals" or "Facturen".
+- **Agents:** a grid of every agent as a 3D portrait, showing what it's doing. Name agents, or move them into a project, including new ones like "Proposals" or "Invoices".
 - **📍 Show on planet:** opens the notch and flies the camera to that agent or project.
 - **Usage:** your plan usage over the last 7 days (the 5-hour window and the week), plus Claude Code tokens per day.
 
