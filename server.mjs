@@ -439,14 +439,18 @@ export function startServer({ port = PORT, onChange, statePath, seedTranscripts,
   }
 
   // Plan usage, as the Claude desktop app last recorded it (5-hour and 7-day % used)
-  let usage = null;
+  let usage = null, usageHistory = [];
   const USAGE_FILE = path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'plan-usage-history.json');
   const loadUsage = () => {
     try {
       const samples = JSON.parse(fs.readFileSync(USAGE_FILE, 'utf8'))?.samples || [];
       const last = samples[samples.length - 1];
       usage = last ? { fiveHour: typeof last.u?.fh === 'number' ? last.u.fh : null, sevenDay: typeof last.u?.sd === 'number' ? last.u.sd : null, at: last.t } : null;
-    } catch { usage = null; }
+      // v5: the last 7 days for the crew manager's usage chart (a few hundred samples at most)
+      const num = (v) => typeof v === 'number' ? v : null;
+      const since = Date.now() - 7 * 864e5;
+      usageHistory = samples.filter((x) => x?.t >= since).map((x) => ({ t: x.t, fiveHour: num(x.u?.fh), sevenDay: num(x.u?.sd), extra: num(x.u?.xu) }));
+    } catch { usage = null; usageHistory = []; }
   };
   loadUsage();
   fs.watchFile(USAGE_FILE, { interval: 15000 }, () => { loadUsage(); changed(); });
@@ -465,7 +469,7 @@ export function startServer({ port = PORT, onChange, statePath, seedTranscripts,
     o.names = names;
     o.work = work;
     o.custom = custom; o.seenProjects = seenProjects; o.reviewed = reviewed;
-    o.usage = usage; o.privacy = privacy;
+    o.usage = usage; o.usageHistory = usageHistory; o.privacy = privacy;
     return JSON.stringify(o);
   };
   const changed = () => {
@@ -542,10 +546,12 @@ export function startServer({ port = PORT, onChange, statePath, seedTranscripts,
         if (url.pathname === '/custom') {
           if (!okKey(j?.key) || !j.patch || typeof j.patch !== 'object') { res.writeHead(400).end(); return; }
           const cur = { ...(custom[j.key] || {}) };
-          const allowed = { color: 'string', hat: 'string', theme: 'string', spot: 'object', hidden: 'boolean' };
+          const allowed = { color: 'string', hat: 'string', theme: 'string', spot: 'object', hidden: 'boolean', removed: 'number' };
           for (const [f, v] of Object.entries(j.patch)) {
             if (!(f in allowed)) continue;
             if (v === null) delete cur[f];
+            else if (f === 'color') { if (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)) cur.color = v.toLowerCase(); }
+            else if (f === 'removed') { if (Number.isFinite(v) && v > 0) cur.removed = Math.round(v); }
             else if (f === 'spot') { if (Array.isArray(v) && v.length === 3 && v.every(Number.isFinite)) cur.spot = v.map(Number); }
             else if (typeof v === allowed[f]) cur[f] = typeof v === 'string' ? v.slice(0, 40) : v;
           }

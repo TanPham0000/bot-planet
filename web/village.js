@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { piece, at, place, groundR, height, offsetDir, surfaceQuat, makeRand, WATER } from './world.js';
 import { ACCENTS, hashStr } from './astronaut.js';
-import { colorFor, biomeFor, customFor } from './colors.js';
+import { colorFor, biomeFor, customFor, isGone } from './colors.js';
 
 // Finished turns needed for each level: tent, hut, cottage, house, two-storey, tower, observatory
 export const LEVELS = [1, 5, 15, 40, 100, 250, 600];
@@ -285,7 +285,7 @@ export function createVillage({ world, fx, campDir, campRadius }) {
         const last = Math.max(p.lastAt || 0, a?.lastAt || 0);
         return now - last < IDLE_DAYS * 86400000 || (a?.score || 0) > 0.5;
       };
-      const all = [...byName.values()].filter((p) => recent(p) && !look(p.name).hidden).sort((a, b) => (act(b)?.score || 0) - (act(a)?.score || 0) || b.turns - a.turns);
+      const all = [...byName.values()].filter((p) => recent(p) && !isGone(p.name)).sort((a, b) => (act(b)?.score || 0) - (act(a)?.score || 0) || b.turns - a.turns);
       const projects = all.slice(0, MAX_PLOTS);
       const maxScore = Math.max(1, ...projects.map((p) => act(p)?.score || 0));
       for (const p of projects) p.footprint = Math.sqrt((act(p)?.score || 0) / maxScore); // 0…1

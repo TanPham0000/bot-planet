@@ -235,7 +235,7 @@ export function createUI(opts, on) {
   function fillCard(d, accent) {
     cardData = d;
     $('c-dot').style.background = accent;
-    if (!editing) $('c-name').textContent = d.name || d.project;
+    if (!editing) $('c-name').textContent = d.nick ? `${d.nick} · ${d.name || d.project}` : d.name || d.project;
     const st = $('c-status');
     st.className = 'status ' + d.status;
     st.textContent = `${describe(d)} · ${ago(d.since)}`;

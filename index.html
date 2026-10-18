@@ -7,7 +7,7 @@
 <style>
   :root {
     --ink: #3b3552;
-    --ink-soft: #7a7392;
+    --ink-soft: #645d7d;
     --card: rgba(255, 252, 246, 0.95);
     --orange: #d97757;
     --orange-hot: #ff7a45;
@@ -64,11 +64,11 @@
   .alert .badge { animation: wiggle .55s ease-in-out 4; }
   .open .badge { display: none; }
   .flash-done #ear-r::after { content: "✓"; color: var(--mint); font-weight: 900; font-size: 14px; animation: popin .4s var(--spring); }
-  .counts { font-size: 10.5px; color: rgba(255,255,255,.65); font-weight: 600; display: none; }
+  .counts { font-size: 11px; color: rgba(255,255,255,.82); font-weight: 600; display: none; }
   .open .counts { display: inline; }
   .counts b { color: #fff; }
   .counts b.hot { color: var(--orange-hot); }
-  #pin { display: none; width: 20px; height: 20px; border: 0; border-radius: 6px; background: rgba(255,255,255,.08); color: rgba(255,255,255,.6); cursor: pointer; padding: 0; font-size: 10px; filter: grayscale(1); }
+  #pin { display: none; width: 20px; height: 20px; border: 0; border-radius: 6px; background: rgba(255,255,255,.08); color: rgba(255,255,255,.8); cursor: pointer; padding: 0; font-size: 10px; filter: grayscale(1); }
   #pin.on { background: rgba(255,255,255,.22); filter: none; }
   .open #pin { display: inline-block; }
   @keyframes wiggle { 0%,100% { transform: rotate(0) scale(1); } 25% { transform: rotate(-12deg) scale(1.12); } 75% { transform: rotate(12deg) scale(1.12); } }
@@ -108,10 +108,10 @@
   /* ── hover name tag (CSS2D) ─────────────────────────────────── */
   .tag { margin-top: -24px; padding: 3px 8px; border-radius: 999px; background: var(--card); color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,.2); white-space: nowrap; text-align: center; animation: popin .2s var(--spring); }
   .tag b { font-size: 10.5px; display: block; line-height: 1.2; }
-  .tag span { font-size: 9px; color: var(--ink-soft); font-weight: 600; }
+  .tag span { font-size: 10px; color: var(--ink-soft); font-weight: 600; }
 
   /* ── camp task board (CSS2D) ────────────────────────────────── */
-  .board { pointer-events: auto; width: 172px; font-size: 10px; background: rgba(255, 248, 236, .95); color: var(--ink); border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.3); overflow: hidden; cursor: default; }
+  .board { pointer-events: auto; width: 180px; font-size: 10.5px; background: rgba(255, 248, 236, .95); color: var(--ink); border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.3); overflow: hidden; cursor: default; }
   .board h4 { margin: 0; padding: 5px 9px; font-size: 10.5px; display: flex; justify-content: space-between; gap: 6px; background: rgba(156,107,78,.16); }
   .board h4 span { color: var(--ink-soft); font-weight: 700; }
   .board ul { list-style: none; margin: 0; padding: 0; max-height: 0; overflow: hidden; transition: max-height .3s ease; }
@@ -120,7 +120,7 @@
   .board li:hover { background: rgba(217,119,87,.12); }
   .board li i { width: 7px; height: 7px; border-radius: 50%; grid-row: span 2; }
   .board li b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .board li small { grid-column: 2; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+  .board li small { grid-column: 2; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 
   /* ── detail card ────────────────────────────────────────────── */
   #card {
@@ -184,13 +184,13 @@
   .tile .lab { font-size: 10px; color: var(--ink-soft); font-weight: 700; }
   .tile b { font-size: 17px; line-height: 1.15; }
   .tile .d { font-size: 10px; font-weight: 700; color: var(--ink-soft); }
-  .tile .d.up::first-letter, .tile .d.down::first-letter { font-size: 8px; }
+  .tile .d.up::first-letter, .tile .d.down::first-letter { font-size: 9px; }
   .bars { display: flex; align-items: flex-end; height: 46px; margin-top: 10px; border-bottom: 1px solid rgba(0,0,0,.12); }
   .bars i { height: 100%; display: flex; align-items: flex-end; justify-content: center; padding: 0 1px; cursor: default; }
   .bars i span { display: block; width: 100%; max-width: 12px; border-radius: 4px 4px 0 0; background: #8b84a3; }
   .bars i span.today { background: var(--orange); }
   .bars i:hover span { filter: brightness(.85); }
-  .axis { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--ink-soft); margin-top: 3px; }
+  .axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-soft); margin-top: 3px; }
   .rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
   .rank li { display: grid; grid-template-columns: 9px minmax(0, 92px) 1fr 26px; align-items: center; gap: 7px; }
   .rank li i { width: 9px; height: 9px; border-radius: 50%; }
@@ -213,7 +213,7 @@
   .sched b { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sched small { font-size: 10px; color: var(--ink-soft); white-space: nowrap; }
   .sched .run { color: var(--orange); }
-  .sched .last { font-size: 9.5px; color: var(--ink-soft); white-space: nowrap; }
+  .sched .last { font-size: 10px; color: var(--ink-soft); white-space: nowrap; }
   .sched .last.failed { color: #c0392b; font-weight: 700; }
   .continent { display: flex; align-items: center; gap: 5px; padding: 2px 8px 2px 6px; border-radius: 999px; background: rgba(20,18,36,.62); color: #fff; font-size: 10.5px; font-weight: 800; letter-spacing: .02em; white-space: nowrap; pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
   .continent i { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 1.5px rgba(255,255,255,.75); }
@@ -224,7 +224,7 @@
   #toast.show { opacity: 1; transform: translate(-50%, 0); }
   #counts { cursor: pointer; border-radius: 6px; padding: 1px 4px; }
   #counts:hover { background: rgba(255,255,255,.12); }
-  .busytag { margin-top: 16px; display: flex; align-items: center; gap: 4px; padding: 1px 7px 1px 5px; border-radius: 999px; background: rgba(20,18,36,.7); color: #fff; font-size: 9.5px; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+  .busytag { margin-top: 16px; display: flex; align-items: center; gap: 4px; padding: 1px 7px 1px 5px; border-radius: 999px; background: rgba(20,18,36,.7); color: #fff; font-size: 10px; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
   .busytag i { width: 7px; height: 7px; border-radius: 50%; }
   .busytag b { font-weight: 800; max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
   .busytag span { font-size: 10px; }
@@ -247,7 +247,7 @@
   #tip { position: fixed; z-index: 9; pointer-events: none; background: #2b2740; color: #fff; font-size: 10.5px; font-weight: 600; padding: 4px 8px; border-radius: 7px; white-space: nowrap; transform: translate(-50%, calc(-100% - 8px)); }
   .board h4 button { border: 0; background: rgba(217,119,87,.18); color: var(--ink); border-radius: 999px; padding: 1px 7px; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
 
-  #demo-note { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 10px; color: rgba(255,255,255,.7); background: rgba(60,50,90,.5); padding: 3px 9px; border-radius: 999px; white-space: nowrap; pointer-events: none; transition: opacity .3s; }
+  #demo-note { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 10.5px; color: rgba(255,255,255,.88); background: rgba(60,50,90,.7); padding: 3px 9px; border-radius: 999px; white-space: nowrap; pointer-events: none; transition: opacity .3s; }
   body.browser #demo-note { position: fixed; }
   .carded #demo-note { opacity: 0; }
 </style>

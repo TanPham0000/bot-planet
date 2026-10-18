@@ -25,10 +25,10 @@ export function assignColors(names) {
   // a custom colour reserves its slot: auto-assigned projects steer clear of it where they can
   const reserved = new Set(Object.keys(custom).filter((k) => wanted.has(k)).map((k) => customSlot(k)).filter((i) => i >= 0));
   // projects with their own colour don't hold a sticky slot; a sticky slot someone chose gets freed
-  for (const k of Object.keys(map)) if (customSlot(k) >= 0 || reserved.has(map[k])) { delete map[k]; changed = true; }
+  for (const k of Object.keys(map)) if (customSlot(k) >= 0 || freeColor(k) || reserved.has(map[k])) { delete map[k]; changed = true; }
   const used = new Set([...Object.values(map), ...reserved]);
   for (const n of names.map(norm)) {
-    if (!n || n in map || customSlot(n) >= 0) continue;
+    if (!n || n in map || customSlot(n) >= 0 || freeColor(n)) continue;
     const free = PALETTE.findIndex((_, i) => !used.has(i));
     if (free < 0) break; // more than 8 projects: the rest stay on neutral "wild lands"
     map[n] = free; used.add(free); changed = true;
@@ -56,5 +56,12 @@ const customSlot = (name) => {
 
 /** Palette slot: the custom colour first, then the sticky assignment, else -1. */
 export const slotFor = (name) => { const c = customSlot(name); return c >= 0 ? c : norm(name) in map ? map[norm(name)] : -1; };
-export const colorFor = (name) => { const s = slotFor(name); return s >= 0 ? PALETTE[s] : null; };
-export const biomeFor = (name) => { const s = slotFor(name); return s >= 0 ? BIOMES[s] : null; };
+// A colour picked freely in the crew manager (not one of the 8): used as-is, and it borrows the biome of the
+// nearest palette colour so its continent still grows something fitting.
+const freeColor = (name) => { const c = custom[norm(name)]?.color; return typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) && customSlot(name) < 0 ? c.toLowerCase() : null; };
+const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const nearestSlot = (hex) => { const a = rgb(hex); let best = 0, bd = Infinity; PALETTE.forEach((p, i) => { const b = rgb(p); const d = (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2; if (d < bd) { bd = d; best = i; } }); return best; };
+export const colorFor = (name) => { const f = freeColor(name); if (f) return f; const s = slotFor(name); return s >= 0 ? PALETTE[s] : null; };
+export const biomeFor = (name) => { const f = freeColor(name); if (f) return BIOMES[nearestSlot(f)]; const s = slotFor(name); return s >= 0 ? BIOMES[s] : null; };
+/** Hidden from the planet, or deleted from the UI (custom.removed). */
+export const isGone = (name) => { const c = custom[norm(name)]; return !!(c?.hidden || c?.removed); };

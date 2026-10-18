@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>v5 terrain test</title>
+<!-- Serve with: node scripts/serve-test.mjs 4798  →  http://localhost:4798/scripts/v5-terrain.html
+     Console: sheet() writes the look sheet PNG, setTime(22), faces(), closeUp(i), custom({...}), failSat(), step(n) -->
+<style>
+  html, body { margin: 0; height: 100%; background: #12112a; overflow: hidden; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { buildWorld, offsetDir } from '/web/world.js';
+import { makeFX } from '/web/fx.js';
+import { createVillage } from '/web/village.js';
+import { createLandmarks } from '/web/landmarks.js';
+import { Astronaut } from '/web/astronaut.js';
+import { createSatellites } from '/web/routines.js';
+import { assignColors, colorFor, setCustom } from '/web/colors.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+const VW = 900, VH = 600;
+renderer.setSize(VW, VH);
+renderer.setClearColor(0, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, VW / VH, 0.1, 200);
+scene.add(camera);
+const hemi = new THREE.HemisphereLight(0xfff4e0, 0x7d70b8, 1.35); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff0dc, 2.0); sun.position.set(6, 7, 5); camera.add(sun);
+const rim = new THREE.DirectionalLight(0xa9c8ff, 0.7); rim.position.set(-6, -2, -6); camera.add(rim);
+const W = buildWorld(scene, camera);
+const fx = makeFX(W.world);
+const village = createVillage({ world: W.world, fx, campDir: W.campDir, campRadius: W.CAMP_RADIUS });
+const landmarks = createLandmarks({ world: W.world, fx });
+const sats = createSatellites({ world: W.world, scene });
+
+const now = Date.now();
+const V = { projects: [
+  { key: '/a/bot-planet', name: 'bot-planet', turns: 300, edits: 200, lastAt: now - 3600e3 },
+  { key: '/a/outreach', name: 'PHAM outreach', turns: 120, edits: 60, lastAt: now - 3 * 86400e3 },
+  { key: '/a/garden', name: 'Garden journal', turns: 45, edits: 30, lastAt: now - 2 * 3600e3 },
+  { key: '/a/fact', name: 'Facturen', turns: 20, edits: 10, lastAt: now - 5 * 86400e3 },
+  { key: '/a/secret', name: 'Secret thing', turns: 60, edits: 10, lastAt: now - 3600e3 },
+] };
+let customObj = {};
+function sync() {
+  village.update(V, { animate: false, custom: customObj });
+  const byTurns = [...village.plots.values()].sort((a, b) => (b.turns || 0) - (a.turns || 0)).map((p) => p.name);
+  if (assignColors(byTurns)) village.update(V, { animate: false, custom: customObj });
+  W.setContinents(village.seeds());
+  landmarks.update([...village.plots.values()].filter((p) => !p.vanishing)
+    .map((p) => ({ key: p.key, name: p.name, dir: p.dir, level: p.level, color: colorFor(p.name) || p.color })));
+  for (const a of agents) a.setData({ ...a.data });
+}
+const env = {
+  world: W.world, fx, campDir: W.campDir, campRadius: W.CAMP_RADIUS,
+  seatDir: (i) => W.seats[Math.max(0, i)].dir, homeDir: (n) => village.homeOf(n), homeSpot: (n, i) => village.homeSpot(n, i),
+};
+const STAT = [
+  ['idle', 'bot-planet', now - 60e3], ['working', 'bot-planet', now - 60e3], ['help', 'PHAM outreach', now - 60e3],
+  ['done', 'Garden journal', now - 60e3], ['idle', 'Facturen', now - 30 * 60e3], ['working', 'Garden journal', now - 12 * 60e3],
+];
+const agents = STAT.map(([status, name, t], i) => {
+  const a = new Astronaut({ id: 's' + i, name, status, tool: status === 'working' ? 'Read' : '', since: t, updated: t, subagents: [] }, env, offsetDir(W.campDir, i, 0.2));
+  a.seat = i;
+  return a;
+});
+sync();
+sats.update([
+  { id: 'r1', name: 'Morning digest', cron: '0 9 * * *', tz: 'UTC', enabled: true, lastRun: { status: 'succeeded', at: new Date(now - 3600e3).toISOString() } },
+  { id: 'r2', name: 'Outreach rhythm', cron: '0 14 * * 1-5', tz: 'UTC', enabled: true, lastRun: { status: 'failed', at: new Date(now - 7200e3).toISOString() } },
+]);
+sats.refresh();
+
+let t = 0;
+const camLocal = new THREE.Vector3();
+function step(n = 1, dt = 1 / 30) {
+  for (let i = 0; i < n; i++) {
+    t += dt;
+    W.update(t, dt); village.tick(t, dt); landmarks.tick(t, dt); fx.update?.(dt); sats.tick(t, dt, () => null);
+    W.world.worldToLocal(camLocal.copy(camera.position));
+    const ctx = { t, dt, camLocal, agents, camDirLocal: camLocal.clone().normalize(), speaking: new Set() };
+    for (const a of agents) a.update(ctx);
+  }
+  renderer.render(scene, camera);
+}
+function look(dir, dist = 12) { camera.position.copy(dir).normalize().multiplyScalar(dist); camera.up.set(0, 1, 0); camera.lookAt(0, 0, 0); }
+look(W.campDir.clone().add(new THREE.Vector3(0, 0.3, 0)), 12);
+function setTime(h) {
+  const d = new Date(); d.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0);
+  const r = W.setTimeOfDay(d, { sun, rim, hemi });
+  village.setNight(r.night);
+  step(2);
+  return r;
+}
+/** Close-up on astronaut i's face. */
+function closeUp(i, dist = 1.4) {
+  const a = agents[i];
+  const head = a.root.position.clone().addScaledVector(a.p, 0.55);
+  const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(a.root.quaternion);
+  camera.position.copy(head).addScaledVector(fwd, dist).addScaledVector(a.p, 0.15);
+  camera.up.copy(a.p); camera.lookAt(head);
+  renderer.render(scene, camera);
+}
+/** Camera straight in front of astronaut i's visor, whatever its pose. */
+function faceCam(i, dist = 0.9) {
+  const a = agents[i];
+  a.root.updateMatrixWorld(true);
+  const eye = a.eyes[0].getWorldPosition(new THREE.Vector3()).add(a.eyes[1].getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
+  const c = a.head.getWorldPosition(new THREE.Vector3());
+  const n = eye.clone().sub(c).normalize();
+  camera.position.copy(eye).addScaledVector(n, dist);
+  camera.up.copy(new THREE.Vector3(0, 1, 0).applyQuaternion(a.head.getWorldQuaternion(new THREE.Quaternion())));
+  camera.lookAt(eye);
+  renderer.render(scene, camera);
+}
+async function grid(shots, labels = [], cols = 3, w = 300, h = 300) {
+  const c = document.createElement('canvas'); c.width = cols * w; c.height = Math.ceil(shots.length / cols) * h;
+  const g = c.getContext('2d'); g.fillStyle = '#0d0c1d'; g.fillRect(0, 0, c.width, c.height);
+  shots.forEach((fn, i) => {
+    fn(); const src = renderer.domElement, s = Math.min(src.width, src.height);
+    g.drawImage(src, (src.width - s) / 2, (src.height - s) / 2, s, s, (i % cols) * w, Math.floor(i / cols) * h, w, h);
+    g.fillStyle = '#fff'; g.font = '14px sans-serif'; g.fillText(labels[i] ?? String(i), (i % cols) * w + 6, Math.floor(i / cols) * h + 16);
+  });
+  return (await fetch('/save-png', { method: 'POST', body: c.toDataURL('image/png') })).text();
+}
+function closeTo(dir, dist = 3) {
+  const p = dir.clone().normalize();
+  camera.position.copy(p).multiplyScalar(3 + dist); camera.up.set(0, 1, 0); camera.lookAt(p.multiplyScalar(3));
+  renderer.render(scene, camera);
+}
+function custom(c) { customObj = c; setCustom(c); sync(); step(2); }
+setTime(13);
+step(120);
+async function snap() {
+  renderer.render(scene, camera);
+  const c = document.createElement('canvas'); c.width = renderer.domElement.width; c.height = renderer.domElement.height;
+  const g = c.getContext('2d'); g.fillStyle = '#0d0c1d'; g.fillRect(0, 0, c.width, c.height); g.drawImage(renderer.domElement, 0, 0);
+  const url = c.toDataURL('image/png'); return (await fetch('/save-png', { method: 'POST', body: url })).text(); }
+function size(w, h) { renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+Object.assign(window, { faceCam, grid, snap, size, renderer, step, setTime, closeUp, closeTo, custom, agents, village, landmarks, sats, W, look, camera, THREE, render: () => renderer.render(scene, camera) });
+/** v5: the standard look sheet: day from the camp, far side, side, golden hour, night, close-up. */
+function sheet(w = 450) {
+  const cam = W.campDir.clone(), V = THREE.Vector3;
+  const go = (h, dir, dist) => () => { setTime(h); look(dir, dist); step(2); };
+  return grid([go(13, cam.clone().add(new V(0, 0.3, 0)), 12), go(13, cam.clone().negate(), 12), go(13, new V(1, 0.2, 0), 11),
+    go(18.8, cam.clone().add(new V(0, 0.3, 0)), 12), go(23, cam.clone().add(new V(0, 0.3, 0)), 12), go(13, cam.clone(), 6.5)],
+    ['day camp', 'far side', 'side', 'golden', 'night', 'close'], 3, w, w);
+}
+window.sheet = sheet;
+window.ready = true;
+</script>
+</body>
+</html>

@@ -170,3 +170,34 @@ Ownership this round:
   - `setNight(k /*0 day … 1 night*/)`: windows of houses whose project is active glow at night.
 - `world.js`: `setTimeOfDay(date)` covers sun colour and intensity, hemisphere tint, and a soft night sky.
 - `routines.js`: a satellite whose `lastRun.status === 'failed'` shows a red light and a red-tinted body.
+
+## v5 (round 5): planet look, crew dashboard pass
+
+### Ownership
+- **Planet session:** `web/world.js`, new `web/clouds.js`, `web/astronaut.js` (speed only, plus anything the new terrain needs), `scripts/v5-terrain.html` (optional test page).
+- **Crew session:** `crew.html`, `web/crew.js`, `web/crew-3d.js`, `scripts/crew-test.mjs`.
+- **Lead:** `server.mjs`, `cowork.mjs`, `main.mjs`, `preload.cjs`, `web/app.js`, `web/ui.js`, `index.html`, `web/colors.js`, `web/village.js`, `web/landmarks.js`, this file.
+- Don't edit files you don't own; don't commit. Message the lead for changes in someone else's file.
+
+### Server → page (SSE additions)
+```ts
+{
+  custom: Record<nameKey, { …v4 fields,
+    color?: string,      // NOW any '#rrggbb' (not only PALETTE). colors.js treats non-palette colours as custom.
+    removed?: number,    // ms when the user deleted the project from the UI. Planet: not shown (like hidden).
+                         // Crew: listed only under a collapsed "Removed" section with Restore (patch {removed:null}).
+  }>,
+  usageHistory: Array<{ t: number, fiveHour: number|null, sevenDay: number|null, extra: number|null }>, // last 7 days, oldest first; extra = 'xu' (extra-usage credits %, rarely present)
+}
+```
+### Page → server
+- `POST /custom` accepts `removed` (number or null) and any `#rrggbb` color.
+- New project for Cowork agents: pick a key `project:<slug>` (slug = lowercase name, non-alphanumerics → '-'), then `POST /name {key, name}` and `POST /assign {session, key}` per agent. Unassign: `POST /assign {session, key: null}`. (Already supported; groups with that key appear in `cowork.groups`.)
+- Agent names: `POST /name {key: 'agent:<sessionId>', name}` — the lead makes agent names show on the planet; Claude Code sessions use `agent:<session id>` too.
+
+### Bridge additions (`window.botPlanet`)
+- `showOnPlanet(target)`: target is an agent/session id, or `'project:' + nameKey`. Opens the notch and flies the camera to it with a highlight pulse. Outside Electron the crew page shows a toast instead.
+
+### Renderer contracts
+- `world.js` keeps every existing export and signature (`setContinents`, `setTimeOfDay`, country shader, water, etc). New look: stylised cartoon planet (warm yellow-green key light, teal/blue shade side, darker rim, ridged green hills, turquoise shallows → deep blue sea, thick cream clouds hugging the planet). Clouds live in `clouds.js`: `makeClouds(scene|group, radius)` → `{ tick(dt, t), setNight(k), group }`; world.js creates and ticks them so app.js needs no change. Battery: no new per-frame allocations, cloud count small, everything static except slow drift.
+- `astronaut.js`: each astronaut gets a stable personal pace `0.75–1.35×` from a hash of its id (`Astronaut.pace`), applied to walking/wandering speed and step animation rate. Stuck/slow multipliers still apply on top.

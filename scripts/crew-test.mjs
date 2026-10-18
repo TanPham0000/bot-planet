@@ -1,6 +1,7 @@
-// Test harness for crew.html: serves the page + /web, /three, /assets, proxies /events, /logbook and /name
-// to a real Bot Planet server, and mocks the v4 endpoints (/custom, /seen, /reviewed) in memory, so the
-// crew manager can be tried before server.mjs has them. Fields the upstream already sends win.
+// Test harness for crew.html: serves the page + /web, /three, /assets, proxies /events, /logbook, /name and
+// /assign to a real Bot Planet server, and mocks the v4/v5 endpoints (/custom incl. removed + any #rrggbb,
+// /seen, /reviewed) and fields (usage, usageHistory) in memory, so the crew manager can be tried before
+// server.mjs has them. Fields the upstream already sends win; add ?usage=demo for a busy fake usage week.
 // Usage: BOT_PLANET_PORT=4796 node server.mjs  &  node scripts/crew-test.mjs [port=4797] [upstream=4796]
 // Then open http://localhost:4797/crew.html  (add ?privacy=1 to test privacy mode, ?host=1 to fake a hostId).
 import http from 'node:http';
@@ -14,7 +15,16 @@ const up = Number(process.argv[3]) || 4796;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 const MOUNTS = { '/three/': 'node_modules/three', '/web/': 'web', '/assets/': 'assets' };
 
-const mock = { custom: {}, seenProjects: {}, reviewed: {}, usage: { fiveHour: 42, sevenDay: 18, at: Date.now() } };
+// a plausible week: the 5-hour window fills and resets, the weekly % climbs, extra credits show up once
+const demoHistory = (() => {
+  const out = [], now = Date.now();
+  for (let t = now - 7 * 864e5 + 3600e3, wk = 4; t < now; t += 3.3 * 3600e3) {
+    wk = Math.min(100, wk + Math.random() * 3.2);
+    out.push({ t, fiveHour: Math.round(((t / 3600e3) % 5) * 19 + Math.random() * 6), sevenDay: Math.round(wk), extra: wk > 75 ? Math.round((wk - 75) * 3) : null });
+  }
+  return out;
+})();
+const mock = { custom: {}, seenProjects: {}, reviewed: {}, usage: { fiveHour: 42, sevenDay: 18, at: Date.now() }, usageHistory: demoHistory };
 // pretend two projects appeared recently, so the NEW badges show up
 let last = null;
 const clients = new Set(); // { res, privacy, host }
@@ -22,7 +32,8 @@ const clients = new Set(); // { res, privacy, host }
 function merged(c) {
   if (!last) return null;
   const m = { ...last };
-  for (const k of ['custom', 'seenProjects', 'reviewed', 'usage']) if (!(k in last)) m[k] = mock[k];
+  for (const k of ['custom', 'seenProjects', 'reviewed', 'usage', 'usageHistory']) if (!(k in last)) m[k] = mock[k];
+  if (c.demo) { m.usageHistory = mock.usageHistory; const l = demoHistory[demoHistory.length - 1]; m.usage = { fiveHour: l.fiveHour, sevenDay: l.sevenDay, at: l.t }; }
   if (c.privacy) m.privacy = true;
   if (c.host && m.sessions?.length) m.sessions = m.sessions.map((s, i) => (i === 0 && !s.hostId ? { ...s, hostId: 'local_test-host-id' } : s));
   return m;
@@ -67,7 +78,7 @@ http.createServer(async (req, res) => {
   const p = decodeURIComponent(url.pathname);
   if (req.method === 'GET' && p === '/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    const c = { res, privacy: url.searchParams.get('privacy') === '1', host: url.searchParams.get('host') === '1' };
+    const c = { res, privacy: url.searchParams.get('privacy') === '1', host: url.searchParams.get('host') === '1', demo: url.searchParams.get('usage') === 'demo' };
     clients.add(c); send(c);
     req.on('close', () => clients.delete(c));
     return;
@@ -76,7 +87,7 @@ http.createServer(async (req, res) => {
   if (req.method === 'POST') {
     const b = await body(req);
     console.log('POST', p, JSON.stringify(b));
-    if (p === '/name') return proxy(req, res, JSON.stringify(b));
+    if (p === '/name' || p === '/assign' || (last && 'custom' in last)) return proxy(req, res, JSON.stringify(b)); // upstream has v4+: let it own the writes
     if (p === '/custom' && b.key) {
       const cur = { ...(mock.custom[b.key] || {}) };
       for (const [k, v] of Object.entries(b.patch || {})) { if (v === null) delete cur[k]; else cur[k] = v; }

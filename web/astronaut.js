@@ -8,6 +8,7 @@ export const ACCENTS = ['#f59bae', '#8cc8f5', '#ffc96b', '#b49cf5', '#7fd9b4', '
 export const hashStr = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 export const SLEEP_MS = 20 * 60 * 1000;
 export const STUCK_MS = 8 * 60 * 1000;
+export const paceFor = (id) => 0.75 + (hashStr(id + '#pace') % 1000) / 999 * 0.6;
 
 // ── what a tool looks like as a job on the planet ─────────────────────────
 export const ACTIVITY = {
@@ -193,6 +194,8 @@ export class Astronaut {
     shared();
     this.env = env;
     this.id = data.id;
+    /** Personal walking pace, stable per id: 0.75 (ambler) … 1.35 (hurrier). Scales walk/wander speed and step rate. */
+    this.pace = paceFor(data.id);
     this.data = data;
     this.lookKey = lookKeyOf(data);
     this.accent = accentFor(this.lookKey);
@@ -530,7 +533,7 @@ export class Astronaut {
     }
     if (this.greet && (mode === 'wander' || mode === 'walk' || mode === 'pause')) mode = 'greet';
 
-    speed *= slow;
+    speed *= slow * this.pace; // steps (walkPhase) follow distance, so they quicken with pace too
     // ── move ──
     if (mode === 'walk' && target) {
       tmpV.copy(target).sub(this.p).projectOnPlane(this.p);

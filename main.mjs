@@ -230,6 +230,12 @@ ipcMain.on('open-external', (_e, url) => {
   if (/^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(u)) shell.openExternal(u);
 });
 ipcMain.on('open-crew', () => openCrew());
+// Crew manager → notch: open the island and fly to an agent ('<id>' / 'cw:<id>') or a project ('project:<nameKey>').
+ipcMain.on('show-on-planet', (_e, target) => {
+  const t = String(target ?? '');
+  if (!t || t.length > 200 || /[\u0000-\u001f]/.test(t)) return;
+  focusAgent('@where:' + t);
+});
 
 // ── Crew manager: a normal window with the full overview ─────────────────────
 let crewWin = null;

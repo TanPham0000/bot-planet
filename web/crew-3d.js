@@ -2,6 +2,7 @@
 // Both share one render loop that only runs while the window is visible.
 import * as THREE from 'three';
 import { Astronaut, hashStr } from './astronaut.js';
+import { createLandmarks } from './landmarks.js';
 import { height, groundR, offsetDir, makeRand, surfaceQuat, R, WATER } from './world.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -33,7 +34,7 @@ let last = performance.now();
 function frame(now = performance.now()) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   const t = now / 1000;
-  for (const v of views) { fit(v); v.tick?.(t, dt); v.renderer.render(v.scene, v.camera); v.after?.(); }
+  for (const v of views) { if (!v.el.clientWidth) continue; fit(v); v.tick?.(t, dt); v.renderer.render(v.scene, v.camera); v.after?.(); }
 }
 function loop(now) { frame(now); requestAnimationFrame(loop); }
 requestAnimationFrame(loop);
@@ -48,37 +49,55 @@ export function createPreview(el) {
   const renderer = makeRenderer(el);
   const scene = new THREE.Scene();
   lights(scene);
-  const camera = new THREE.PerspectiveCamera(28, 1, 0.01, 50);
-  camera.position.set(0, 0.5, 1.75); camera.lookAt(0, 0.33, 0);
+  const camera = new THREE.PerspectiveCamera(26, 1, 0.01, 50);
+  const FOCUS = new THREE.Vector3(0.03, 0.27, 0);
+  camera.position.set(0.03, 0.62, 2.25); camera.lookAt(FOCUS);
 
-  // a little floating island to stand on
+  // a little floating island to stand on: the astronaut on the left, its landmark on the right
   const island = new THREE.Group();
-  const grass = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.33, 0.06, 28), new THREE.MeshLambertMaterial({ color: '#a6d98f', flatShading: true }));
+  const grass = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.33, 0.06, 32), new THREE.MeshLambertMaterial({ color: '#a6d98f', flatShading: true }));
   grass.position.y = -0.03;
-  const dirt = new THREE.Mesh(new THREE.ConeGeometry(0.33, 0.26, 9), new THREE.MeshLambertMaterial({ color: '#c49a6c', flatShading: true }));
+  const dirt = new THREE.Mesh(new THREE.ConeGeometry(0.33, 0.26, 11), new THREE.MeshLambertMaterial({ color: '#c49a6c', flatShading: true }));
   dirt.rotation.x = Math.PI; dirt.position.y = -0.19;
   island.add(grass, dirt);
-  for (const [x, z, c] of [[-0.22, 0.1, '#ff9aa8'], [0.24, 0.05, '#fff1a8'], [0.15, -0.2, '#c9b5f5'], [-0.12, -0.22, '#ffffff']]) {
+  island.scale.set(1.55, 1, 1.05);
+  for (const [x, z, c] of [[-0.42, 0.12, '#ff9aa8'], [0.05, 0.22, '#fff1a8'], [0.42, -0.16, '#c9b5f5'], [-0.2, -0.24, '#ffffff'], [0.48, 0.12, '#ff9aa8']]) {
     const b = new THREE.Mesh(new THREE.IcosahedronGeometry(0.022, 0), new THREE.MeshLambertMaterial({ color: c, flatShading: true }));
-    b.position.set(x, 0.02, z); island.add(b);
+    b.position.set(x, 0.02, z); scene.add(b);
   }
   scene.add(island);
   const world = new THREE.Group(); scene.add(world);
+  const AX = -0.2; // astronaut x
+
+  // landmark: landmarks.js builds it on the planet's surface; undo that placement so it stands upright here
+  const lmSlot = new THREE.Group(); lmSlot.position.set(0.26, 0, -0.06); lmSlot.rotation.y = -0.35; lmSlot.scale.setScalar(1.3);
+  const lmWorld = new THREE.Group(); lmSlot.add(lmWorld); scene.add(lmSlot);
+  const marks = createLandmarks({ world: lmWorld, fx: FX });
+  const LM_KEY = 'crew-preview';
+  let lmSig = '';
+  function placeLandmark() {
+    const e = marks.marks.get(LM_KEY);
+    if (!e) return;
+    const q = e.g.quaternion.clone().invert();
+    lmWorld.quaternion.copy(q);
+    lmWorld.position.copy(e.g.position).applyQuaternion(q).negate();
+  }
 
   let a = null, look = {}, hopT = -1, spin = 0, dragX = null;
   el.addEventListener('pointerdown', (e) => { dragX = e.clientX; el.setPointerCapture(e.pointerId); });
   el.addEventListener('pointermove', (e) => { if (dragX == null) return; spin += (e.clientX - dragX) * 0.012; dragX = e.clientX; });
   el.addEventListener('pointerup', () => { dragX = null; });
-  el.addEventListener('dblclick', () => { hopT = 0; });
+  el.addEventListener('dblclick', () => { hopT = 0; marks.pulse(look.name); });
 
-  function setLook({ key, name, color, hat }) {
+  /** theme is shown through landmarks.themeOf(name), which reads colors.setCustom — keep that store current. */
+  function setLook({ key, name, color, hat, theme }) {
     if (!a || look.key !== key) {
       if (a) a.dispose();
       a = new Astronaut({ id: 'preview', name, status: 'idle', tool: '', subagents: [], since: Date.now(), updated: Date.now() },
         { world, fx: FX, campDir: UP, campRadius: 0.1, seatDir: () => null }, UP.clone());
-      a.root.position.set(0, 0, 0); a.root.quaternion.identity(); a.root.scale.setScalar(1);
+      a.root.position.set(AX, 0, 0.04); a.root.quaternion.identity(); a.root.scale.setScalar(1);
       look = {};
-    } else if (look.color !== color || look.hat !== hat) hopT = 0; // a happy hop when the look changes
+    } else if (look.color !== color || look.hat !== hat || look.theme !== theme) hopT = 0; // a happy hop when the look changes
     if (look.color !== color || look.hat !== hat) {
       a.accent = color;
       const m = accentMat(color);
@@ -86,10 +105,17 @@ export function createPreview(el) {
       a.bulbMat.color.set(color);
       a.setHat(hat); // uses a.accent for its colour
     }
-    look = { key, color, hat };
+    const sig = `${name}|${color}|${theme}`;
+    if (sig !== lmSig) {
+      lmSig = sig;
+      marks.update([{ key: LM_KEY, name, dir: UP.clone(), level: 2, color }]);
+      placeLandmark();
+    }
+    look = { key, name, color, hat, theme };
   }
 
   const tick = (t, dt) => {
+    marks.tick(t, dt);
     if (!a) return;
     const cyc = t % 6;
     const waving = cyc < 2.2;
@@ -104,8 +130,7 @@ export function createPreview(el) {
     a.eyes[0].scale.y = a.eyes[1].scale.y = blink;
     if (a.hat?.userData.spin) a.hat.userData.spin.rotation.y = t * 9;
     if (dragX == null) spin *= Math.exp(-dt * 1.5);
-    a.root.rotation.y = 0.3 + Math.sin(t * 0.45) * 0.5 + spin;
-    island.rotation.y = a.root.rotation.y * 0.3;
+    a.root.rotation.y = 0.45 + Math.sin(t * 0.45) * 0.35 + spin;
   };
   views.push({ el, renderer, scene, camera, tick });
   return { setLook };

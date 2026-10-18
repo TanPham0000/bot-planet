@@ -1,6 +1,7 @@
-// The planet: terrain, water, scenery (baked into one draw call), the camp, clouds, moon, stars.
+// The planet: terrain, water, scenery (baked into one draw call), the camp, clouds (clouds.js), moon, stars.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { makeClouds } from './clouds.js';
 
 export const R = 3;
 export const WATER = -0.04;
@@ -136,7 +137,9 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
   scene.add(world);
 
   // ── terrain ──
-  const terrain = { attr: null, base: null, tris: [] };
+  // Cartoon-planet look, all per pixel: palette from height (sand → lush green → pale hilltops) with stacked
+  // darker-green ridge lines, then a stylised light pass (warm yellow-green key on the lit side, teal shade,
+  // darker terminator rim). The real lights still do the lighting, so setTimeOfDay keeps working.
   // Countries are coloured per pixel (not per triangle) so borders stay smooth and crisp:
   // each fragment finds its nearest project "capital" (power distance: angle − radius). Inside a radius it
   // takes that country's colour; ink lines mark country edges and shared borders. Index 0 is the camp (neutral).
@@ -146,15 +149,44 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
     uSeedCol: { value: Array.from({ length: MAXC }, () => new THREE.Color('#ffffff')) },
     uCount: { value: 0 },
   };
-  const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-  terrainMat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, cUniforms);
+  // shared by terrain, water and clouds: the key light's direction in view space, its colour, and daylight
+  const look = {
+    uKeyDir: { value: new THREE.Vector3(0.35, 0.4, 0.85).normalize() },
+    uKeyCol: { value: new THREE.Color(1, 1, 1) },
+    uDay: { value: 1 },
+  };
+  const GLSL_HEIGHT = `float hgt(vec3 n) {
+      return 0.13 * sin(2.7 * n.x + 1.3) * sin(2.9 * n.y + 0.4) * sin(2.3 * n.z + 2.1)
+           + 0.06 * sin(6.1 * n.x + 4.2 * n.z) * cos(5.3 * n.y - 1.1)
+           + 0.03 * sin(11.0 * n.y + 7.0 * n.x);
+    }`;
+  const sphereVaryings = (sh) => {
+    Object.assign(sh.uniforms, look);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vDirP;\nvarying float vH;')
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvDirP = normalize(position);\nvH = length(position) - ${R.toFixed(1)};`);
+      .replace('#include <common>', '#include <common>\nvarying vec3 vDirP;\nvarying float vH;\nvarying vec3 vSphN;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vDirP = normalize(position);
+        vH = length(position) - ${R.toFixed(1)};
+        vSphN = normalize(normalMatrix * vDirP);`);
+  };
+  const LOOK_DECL = `varying vec3 vDirP; varying float vH; varying vec3 vSphN;
+    uniform vec3 uKeyDir; uniform vec3 uKeyCol; uniform float uDay;
+    ${GLSL_HEIGHT}
+    float hash1(float x) { return fract(sin(x * 91.17) * 43758.55); }`;
+  // the planet-scale light pass every surface shares: kS = how much this spot faces the key light
+  const LOOK_LIGHT = `
+    vec3 sN = normalize(vSphN);
+    float kS = dot(sN, uKeyDir);
+    float lit = smoothstep(-0.35, 0.8, kS);
+    float fres = 1.0 - clamp(dot(sN, normalize(vViewPosition)), 0.0, 1.0);`;
+
+  const terrainMat = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+  terrainMat.onBeforeCompile = (sh) => {
+    sphereVaryings(sh);
+    Object.assign(sh.uniforms, cUniforms);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        varying vec3 vDirP; varying float vH;
+        ${LOOK_DECL}
         uniform vec4 uSeedDir[${MAXC}]; uniform vec3 uSeedCol[${MAXC}]; uniform int uCount;
         // wobbly, organic coastlines instead of perfect circles (same formula as coastJS)
         float coast(vec3 n, float k) {
@@ -162,6 +194,21 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
                + 0.018 * sin(17.0 * n.x + 13.0 * n.z + k) ;
         }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
+        // ── palette from height ──
+        float h = vH;
+        vec3 sand = vec3(0.97, 0.88, 0.58), deep = vec3(0.10, 0.44, 0.22), lush = vec3(0.33, 0.68, 0.18), top = vec3(0.66, 0.82, 0.26);
+        vec3 land = mix(deep, lush, smoothstep(${(WATER + 0.02).toFixed(3)}, 0.075, h));
+        land = mix(land, top, smoothstep(0.09, 0.17, h));
+        // stacked ridges: wobbly contour layers, each a touch lighter, with a darker-green ledge line under it
+        float lv = (h - ${WATER.toFixed(3)}) * 30.0 + 0.55 * sin(9.0 * vDirP.x + 5.0 * vDirP.z) * sin(7.0 * vDirP.y + 1.7);
+        float band = fract(lv), lvl = floor(lv);
+        land *= 0.95 + 0.07 * hash1(lvl);
+        float ledge = (1.0 - smoothstep(0.0, 0.16, band)) * smoothstep(${(WATER + 0.03).toFixed(3)}, ${(WATER + 0.06).toFixed(3)}, h);
+        land = mix(land, land * vec3(0.66, 0.78, 0.70), ledge * 0.85);
+        // a soft pale beach where land meets the sea
+        land = mix(sand, land, smoothstep(${(WATER + 0.002).toFixed(3)}, ${(WATER + 0.009).toFixed(3)}, h));
+        diffuseColor.rgb = land;
+        float country = 0.0;
         // fade the country colour out softly towards the waterline (no hard cut-offs or beige holes)
         float shore = smoothstep(${(WATER - 0.004).toFixed(3)}, ${(WATER + 0.03).toFixed(3)}, vH);
         if (uCount > 0 && shore > 0.0) {
@@ -174,21 +221,56 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
           if (bi > 0 && b1 < 0.0) {
             vec3 c = uSeedCol[0];
             for (int i = 1; i < ${MAXC}; i++) { if (i == bi) c = uSeedCol[i]; }
-            // keep a little of the terrain's own light/dark variation, so hills still read
-            float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-            vec3 tint = mix(c, vec3(1.0), clamp((lum - 0.72) * 1.4, 0.0, 0.45));
-            diffuseColor.rgb = mix(diffuseColor.rgb, tint, 0.78 * shore);
             // ink: the country's outline, and the line where two countries meet
             float edge = -b1;                       // distance inside its own coast
             float shared = (b2 < 0.0) ? (b2 - b1) : 1.0; // distance to the neighbour's territory
             float line = min(edge, shared * 0.5);
             float ink = 1.0 - smoothstep(0.016, 0.024, line);
+            // a light wash over the green land, deepening into a band just inside the border, so the cartoon
+            // terrain stays dominant even with a dozen countries while each one still reads by border + tint
+            float lum = dot(land, vec3(0.299, 0.587, 0.114));
+            vec3 tint = c * (0.75 + 0.5 * lum);
+            float rimBand = 1.0 - smoothstep(0.025, 0.085, line);
+            country = (0.34 + 0.38 * rimBand) * shore;
+            diffuseColor.rgb = mix(diffuseColor.rgb, tint, country);
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.17, 0.15, 0.27), ink * 0.82 * shore);
           }
-        }`);
+        }`)
+      .replace('#include <opaque_fragment>', `${LOOK_LIGHT}
+        // teal-tinted shade away from the key light, warm yellow-green glow on the lit side, darker rim at the edge
+        outgoingLight = mix(outgoingLight * vec3(0.42, 0.6, 0.7), outgoingLight * 0.82, lit);
+        float warm = pow(max(kS, 0.0), 2.2) * (0.35 + 0.65 * uDay) * (1.0 - 0.6 * country);
+        outgoingLight += uKeyCol * vec3(0.26, 0.22, -0.02) * warm * smoothstep(${WATER.toFixed(3)}, ${(WATER + 0.03).toFixed(3)}, h);
+        outgoingLight *= 1.0 - smoothstep(0.4, 1.0, fres) * (0.7 - 0.4 * lit);
+        #include <opaque_fragment>`);
+  };
+
+  // ocean: turquoise shallows hugging the coasts → saturated teal → deep blue, shading to navy on the night side
+  const waterMat = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+  waterMat.onBeforeCompile = (sh) => {
+    sphereVaryings(sh);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\n${LOOK_DECL}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float depth = ${WATER.toFixed(3)} - hgt(vDirP);
+        vec3 shallow = vec3(0.24, 0.80, 0.74), teal = vec3(0.03, 0.62, 0.72), sea = vec3(0.03, 0.44, 0.78), abyss = vec3(0.05, 0.22, 0.62);
+        vec3 w = mix(shallow, teal, smoothstep(0.002, 0.016, depth));
+        w = mix(w, sea, smoothstep(0.03, 0.09, depth));
+        w = mix(w, abyss, smoothstep(0.12, 0.22, depth));
+        // a thin cream surf line right at the coast
+        w = mix(w, vec3(0.99, 0.96, 0.88), 1.0 - smoothstep(0.0008, 0.0035, depth));
+        diffuseColor.rgb = w;`)
+      .replace('#include <opaque_fragment>', `${LOOK_LIGHT}
+        outgoingLight = mix(outgoingLight * vec3(0.3, 0.42, 0.9), outgoingLight * vec3(0.58, 0.64, 0.68), lit);
+        outgoingLight += uKeyCol * vec3(0.10, 0.16, 0.06) * pow(max(kS, 0.0), 2.0) * (0.35 + 0.65 * uDay);
+        outgoingLight *= 1.0 - smoothstep(0.4, 1.0, fres) * (0.65 - 0.35 * lit);
+        #include <opaque_fragment>`);
   };
   {
-    const geo = new THREE.IcosahedronGeometry(R, 7);
+    // indexed + smooth normals: soft rolling hills instead of facets; the shader draws the detail
+    let geo = new THREE.IcosahedronGeometry(R, 22);
+    geo.deleteAttribute('normal'); geo.deleteAttribute('uv');
+    geo = mergeVertices(geo);
     const pos = geo.attributes.position;
     const v = new THREE.Vector3();
     for (let i = 0; i < pos.count; i++) {
@@ -196,45 +278,22 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
       v.multiplyScalar(R + height(v));
       pos.setXYZ(i, v.x, v.y, v.z);
     }
-    const colors = new Float32Array(pos.count * 3);
-    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
-    const col = new THREE.Color();
-    const sand = new THREE.Color('#f4e2b8'), grass = new THREE.Color('#a6d98f'), grass2 = new THREE.Color('#8bcc7f'),
-      hill = new THREE.Color('#c3e6a4'), peak = new THREE.Color('#f6f1ea');
-    for (let i = 0; i < pos.count; i += 3) {
-      a.fromBufferAttribute(pos, i); b.fromBufferAttribute(pos, i + 1); c.fromBufferAttribute(pos, i + 2);
-      const h = (a.length() + b.length() + c.length()) / 3 - R;
-      if (h < WATER + 0.035) col.copy(sand);
-      else if (h < 0.07) col.copy(grass).lerp(grass2, (Math.sin(i * 12.9898) * 0.5 + 0.5) * 0.6);
-      else if (h < 0.14) col.copy(hill);
-      else col.copy(peak);
-      for (let k = 0; k < 3; k++) col.toArray(colors, (i + k) * 3);
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.computeVertexNormals();
     world.add(new THREE.Mesh(geo, terrainMat));
-    // remember every triangle (direction, height, original colour) so continents can recolour the land
-    terrain.attr = geo.attributes.color;
-    terrain.base = colors.slice();
-    for (let i = 0; i < pos.count; i += 3) {
-      a.fromBufferAttribute(pos, i); b.fromBufferAttribute(pos, i + 1); c.fromBufferAttribute(pos, i + 2);
-      const h = (a.length() + b.length() + c.length()) / 3 - R;
-      terrain.tris.push({ i, n: a.clone().add(b).add(c).normalize(), h, jit: Math.sin(i * 78.233) * 0.5 + 0.5 });
-    }
-    world.add(new THREE.Mesh(
-      new THREE.IcosahedronGeometry(R + WATER, 6), // fine enough that the waterline doesn't step
-      new THREE.MeshLambertMaterial({ color: '#8fd5e6', flatShading: true, transparent: true, opacity: 0.88 }),
-    ));
+    world.add(new THREE.Mesh(new THREE.IcosahedronGeometry(R + WATER, 12), waterMat));
   }
 
   // ── atmosphere ──
   const atmo = new THREE.Mesh(new THREE.SphereGeometry(R * 1.16, 40, 40), new THREE.ShaderMaterial({
     transparent: true, side: THREE.BackSide, blending: THREE.AdditiveBlending, depthWrite: false,
-    uniforms: { color: { value: new THREE.Color('#b7d6ff') } },
+    uniforms: { color: { value: new THREE.Color('#a9e6ff') } },
     vertexShader: `varying vec3 vN; varying vec3 vV;
       void main(){ vec4 mv = modelViewMatrix * vec4(position,1.); vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
     fragmentShader: `uniform vec3 color; varying vec3 vN; varying vec3 vV;
-      void main(){ float f = pow(1. - abs(dot(vN, vV)), 2.2); gl_FragColor = vec4(color, f * 0.55); }`,
+      void main(){
+        // fades to nothing right at its own silhouette, so the shell never draws a hard bright line over the clouds
+        float a = abs(dot(vN, vV)); float f = pow(1. - a, 2.2) * smoothstep(0.0, 0.45, a);
+        gl_FragColor = vec4(color, f * 0.62); }`,
   }));
   scene.add(atmo);
 
@@ -375,23 +434,8 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
   boardAnchor.position.copy(boardDir).multiplyScalar(groundR(boardDir) + 0.45);
   world.add(boardAnchor);
 
-  // ── clouds ──
-  const cloudGeo = mergeGeometries([
-    piece(new THREE.IcosahedronGeometry(0.16, 0), '#ffffff', at(0, 0, 0)),
-    piece(new THREE.IcosahedronGeometry(0.12, 0), '#ffffff', at(0.17, -0.02, 0.03)),
-    piece(new THREE.IcosahedronGeometry(0.11, 0), '#ffffff', at(-0.16, -0.03, -0.02)),
-    piece(new THREE.IcosahedronGeometry(0.09, 0), '#ffffff', at(0.05, 0.08, 0.06)),
-  ]);
-  const cloudMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true, opacity: 0.92 });
-  const clouds = Array.from({ length: 7 }, () => {
-    const m = new THREE.Mesh(cloudGeo, cloudMat);
-    const base = randomDir();
-    const axis = new THREE.Vector3().crossVectors(base, randomDir()).normalize();
-    const c = { m, base, axis, speed: 0.025 + rand() * 0.03, r: R + 1.0 + rand() * 0.35, s: 0.7 + rand() * 0.5, a: rand() * 6 };
-    m.scale.setScalar(c.s);
-    world.add(m);
-    return c;
-  });
+  // ── clouds: thick cream bands hugging the planet (clouds.js) ──
+  const clouds = makeClouds(world, R, look);
 
   // ── moon ──
   const moonPivot = new THREE.Group();
@@ -451,9 +495,26 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
     return { hemi, sun: dirs[0] ?? null, rim: dirs[1] ?? null };
   }
 
-  const tmp = new THREE.Vector3();
+  // the stylised light pass follows the real key light (the sun riding on the camera): direction in view space
+  let keyLight;
+  const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
+  function updateLook() {
+    if (keyLight === undefined) keyLight = findLights().sun;
+    if (!keyLight) return;
+    tmpA.setFromMatrixPosition(keyLight.matrixWorld).applyMatrix4(camera.matrixWorldInverse);
+    tmpB.setFromMatrixPosition(keyLight.target.matrixWorld).applyMatrix4(camera.matrixWorldInverse);
+    if (tmpA.distanceToSquared(tmpB) > 1e-8) {
+      // exaggerate the off-axis part so the warm highlight sits towards the lit limb, like an illustration
+      const k = look.uKeyDir.value.subVectors(tmpA, tmpB).normalize();
+      k.set(k.x * 1.9, k.y * 1.9, k.z).normalize();
+    }
+    look.uKeyCol.value.copy(keyLight.color).multiplyScalar(keyLight.intensity / (baseOf(keyLight).intensity || 1));
+  }
+
   return {
-    world, atmo, moon, campDir, seats, fire, boardAnchor, CAMP_RADIUS, setContinents,
+    world, atmo, moon, campDir, seats, fire, boardAnchor, CAMP_RADIUS, setContinents, clouds,
+    /** Shared stylised-light uniforms { uKeyDir, uKeyCol, uDay } (terrain, water, clouds). */
+    look,
     /** Last computed { day, night, golden, hour } (0…1 each). */
     timeOfDay: tod,
     /**
@@ -492,6 +553,9 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
       mixC(atmo.material.uniforms.color.value, atmoDay, TOD.atmo.golden, TOD.atmo.night, tod);
       starMat.opacity = 0.6 + 0.4 * night;
       starMat.size = 0.085 + 0.035 * night;
+      look.uDay.value = day;
+      clouds.setNight(night);
+      if (L.sun) keyLight = L.sun;
       return { ...tod };
     },
     /** Plant a flower where the user poked (point in world-local space). */
@@ -521,12 +585,8 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
       glow.scale.setScalar(0.7 + tod.night * 0.45);
       flag.rotation.y = Math.sin(t * 3) * 0.25;
 
-      for (const c of clouds) {
-        c.a += c.speed * dt;
-        tmp.copy(c.base).applyAxisAngle(c.axis, c.a);
-        c.m.position.copy(tmp).multiplyScalar(c.r + Math.sin(t * 0.7 + c.a * 9) * 0.03);
-        c.m.quaternion.setFromUnitVectors(UP, tmp);
-      }
+      updateLook();
+      clouds.tick(dt, t);
 
       moonPivot.rotation.y += dt * 0.15;
       moon.rotation.y += dt * (0.3 + moonBoing * 12);

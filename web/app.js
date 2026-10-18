@@ -104,7 +104,7 @@ function syncBusyTags() {
       busyTags.set(a.id, o);
     }
     const job = s === 'help' ? '👋' : ACTIVITY[activityOf(a.data.tool)].emoji;
-    const html = `<i style="background:${a.accent}"></i><b>${escapeHtml(a.data.name || a.data.project)}</b><span>${job}</span>`;
+    const html = `<i style="background:${a.accent}"></i><b>${escapeHtml(a.data.nick || a.data.name || a.data.project)}</b><span>${job}</span>`;
     if (o.element.dataset.html !== html) { o.element.innerHTML = html; o.element.dataset.html = html; }
     o.element.className = 'busytag' + (s === 'help' ? ' hot' : '');
   }
@@ -122,7 +122,7 @@ function openBusyList() {
     ${list.length ? `<ul class="sched busy">${list.map((a) => `
       <li data-agent="${escapeHtml(a.id)}" class="${a.data.status === 'help' ? 'running' : ''}">
         <i style="background:${a.accent}"></i>
-        <div class="what"><b>${escapeHtml(a.data.name || a.data.project)}</b><small>${escapeHtml(privacy ? describe(a.data).split(' · ')[0] : a.data.detail && !a.data.manual ? `${describe(a.data)} · ${a.data.detail}` : describe(a.data))}</small></div>
+        <div class="what"><b>${escapeHtml(a.data.nick || a.data.name || a.data.project)}</b><small>${escapeHtml(privacy ? describe(a.data).split(' · ')[0] : a.data.detail && !a.data.manual ? `${describe(a.data)} · ${a.data.detail}` : describe(a.data))}</small></div>
         <div class="when"><b>${a.data.status === 'help' ? 'needs you' : a.stuck ? '💧 stuck?' : ago(a.data.since)}</b><small>${a.data.manual ? 'marked by you' : privacy ? '' : escapeHtml(a.data.task || '')}</small></div>
       </li>`).join('')}</ul>` : '<p class="sub">Nobody is working right now. Everyone is resting at camp or at home.</p>'}`);
 }
@@ -262,7 +262,7 @@ let villageSeen = false;
 let lastVillage = null, coworkGroups = [], names = {};
 // v4: custom looks/spots from the crew manager, privacy, plan usage, first-seen projects
 let custom = {}, privacy = false, seenProjects = {};
-const hiddenName = (n) => !!custom[String(n || '').trim().toLowerCase()]?.hidden;
+const hiddenName = (n) => { const c = custom[String(n || '').trim().toLowerCase()]; return !!(c?.hidden || c?.removed); };
 const postedSeen = new Set();
 function reportSeen() {
   const fresh = [...village.plots.keys()].filter((k) => !seenProjects[k] && !postedSeen.has(k));
@@ -430,7 +430,9 @@ function connect() {
     coworkSeen = msg.coworkSeen || {};
     scheduleActivity();
     if (msg.routines) { routinesSnap = msg.routines; sats.update(routinesSnap.routines); sats.refresh(); if (!firstSync) checkRoutineFailures(); }
-    const crew = live.concat(coworkCrew(coworkGroups)).filter((s) => !hiddenName(s.name));
+    // names you gave single agents in the crew manager (`agent:<session id>`) ride along as `nick`
+    const crew = live.concat(coworkCrew(coworkGroups)).filter((s) => !hiddenName(s.name))
+      .map((s) => { const nick = names['agent:' + (s.coworkId || s.id)]; return nick ? { ...s, nick } : s; });
     if (crew.length && !forceDemo) { stopDemo(); syncVillage(msg.village); sync(crew); }
     else { startDemo(); coworkGroups = []; syncVillage(forceDemo || !msg.village?.projects?.length ? demoVillage() : msg.village); sync(demo.map((d) => ({ ...d }))); }
   };
@@ -644,7 +646,33 @@ function cycleHelp() {
   const i = waiting.findIndex((a) => a.id === selected);
   openCard(waiting[(i + 1) % waiting.length].id);
 }
-bridge?.onFocusAgent?.((id) => { ui.open(); setTimeout(() => (id === '@logbook' ? openRecap() : id === '@schedule' ? openSchedule() : id === '@postcard' ? postcard() : openCard(id)), 50); });
+bridge?.onFocusAgent?.((id) => { ui.open(); setTimeout(() => (id === '@logbook' ? openRecap() : id === '@schedule' ? openSchedule() : id === '@postcard' ? postcard() : String(id).startsWith('@where:') ? showOnPlanet(String(id).slice(7)) : openCard(id)), 50); });
+// "📍 Show on planet" from the crew manager: an agent id (Cowork ids with or without 'cw:') or 'project:<nameKey>'.
+// Fly there and puff a little ring so the eye finds it.
+function showOnPlanet(target) {
+  if (target.startsWith('project:')) {
+    const key = target.slice(8).trim().toLowerCase();
+    const plot = [...village.plots.values()].find((p) => p.name.trim().toLowerCase() === key);
+    if (plot) {
+      closeCard();
+      const dirW = world.localToWorld(plot.dir.clone().multiplyScalar(R)).normalize();
+      flyTo = dirW.clone().multiplyScalar(Math.min(Math.max(camera.position.length(), 9.5), 11.5));
+      fx.puff(plot.dir.clone().setLength(R + 0.01), plot.dir.clone(), 12);
+      wake(2500);
+      return;
+    }
+    // no house for it (hidden or idle): fall back to one of its astronauts
+    const a = [...agents.values()].find((x) => (x.data.name || '').trim().toLowerCase() === key);
+    if (a) openCard(a.data.id);
+    return;
+  }
+  const id = agents.has(target) ? target : agents.has('cw:' + target) ? 'cw:' + target : null;
+  if (!id) return;
+  openCard(id);
+  const a = agents.get(id);
+  const local = world.worldToLocal(a.root.getWorldPosition(new THREE.Vector3()));
+  fx.puff(local.clone().setLength(R + 0.01), local.clone().normalize(), 10);
+}
 
 function onExpanded(open) {
   if (open) {
@@ -742,7 +770,7 @@ function updateHover() {
     a.root.add(tag);
     tag.position.y = 1.08;
     tag.visible = true;
-    tagEl.innerHTML = `<b>${escapeHtml(a.data.name || a.data.project)}</b><span>${escapeHtml(describe(a.data))}</span>`;
+    tagEl.innerHTML = `<b>${escapeHtml(a.data.nick || a.data.name || a.data.project)}</b><span>${escapeHtml(describe(a.data))}</span>`;
   } else if (sat) {
     canvas.style.cursor = 'pointer';
     sat.g.add(tag);
