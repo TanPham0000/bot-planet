@@ -2,11 +2,12 @@
 import * as THREE from 'three';
 import { groundR, offsetDir, surfaceQuat, UP } from './world.js';
 import { emojiTexture, bubbleTexture, speechTexture, sprite } from './fx.js';
-import { colorFor } from './colors.js';
+import { colorFor, customFor, setCustom } from './colors.js';
 
 export const ACCENTS = ['#f59bae', '#8cc8f5', '#ffc96b', '#b49cf5', '#7fd9b4', '#f7a979', '#d97757', '#9be0e8'];
 export const hashStr = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 export const SLEEP_MS = 20 * 60 * 1000;
+export const STUCK_MS = 8 * 60 * 1000;
 
 // ── what a tool looks like as a job on the planet ─────────────────────────
 export const ACTIVITY = {
@@ -51,6 +52,7 @@ function shared() {
     visor: new THREE.SphereGeometry(0.12, 32, 24),           // smooth: the visor edge is the face
     eye: new THREE.SphereGeometry(0.021, 16, 12),
     sparkle: new THREE.SphereGeometry(0.0065, 8, 6),
+    arcEye: new THREE.TorusGeometry(0.018, 0.0055, 6, 14, Math.PI), // ∩: happy ^ ^ (flipped ∪: asleep)
     antenna: new THREE.CylinderGeometry(0.006, 0.006, 0.08, 4),
     bulb: new THREE.SphereGeometry(0.025, 8, 6),
     arm: new THREE.CapsuleGeometry(0.034, 0.08, 3, 6),
@@ -94,7 +96,16 @@ export const lookKeyOf = (d) => String(d.name || d.projectKey || d.project || d.
 // Projects with a continent wear its colour; everyone else gets a pastel from their name.
 export const accentFor = (key) => colorFor(key) || ACCENTS[hashStr(key) % ACCENTS.length];
 const HATS = ['cap', 'beanie', 'crown', 'headphones', 'propeller', 'tophat', 'bow', 'flower'];
-export const hatFor = (key) => HATS[hashStr(key + '#hat') % HATS.length];
+export { HATS };
+/** The crew's hat: the one picked in the crew manager, else one derived from the name. */
+export const hatFor = (key) => {
+  const h = customFor(key).hat;
+  return HATS.includes(h) ? h : HATS[hashStr(key + '#hat') % HATS.length];
+};
+/** Same store as colors.setCustom (one call updates colours, hats, themes, spots). */
+export const setCustomLooks = setCustom;
+/** Everything that decides how a crew looks; astronauts re-skin when it changes. */
+export const lookSig = (key) => `${accentFor(key)}|${hatFor(key)}`;
 
 let H;
 function hatGeos() {
@@ -185,6 +196,7 @@ export class Astronaut {
     this.data = data;
     this.lookKey = lookKeyOf(data);
     this.accent = accentFor(this.lookKey);
+    this.lookSig = lookSig(this.lookKey);
     this.build();
 
     this.p = startDir.clone().normalize();
@@ -237,8 +249,15 @@ export class Astronaut {
       // round, glowing eyes with a tiny sparkle (blinking squashes both)
       const e = new THREE.Mesh(G.eye, M.eye); e.position.set(sx * 0.047, 0.07, 0.161); e.scale.set(1, EYE_H, 0.55);
       const sp = new THREE.Mesh(G.sparkle, M.sparkle); sp.position.set(0.007, 0.008, 0.017); e.add(sp);
+      e.userData.sx = sx;
       head.add(e); return e;
     });
+    this.arcs = [-1, 1].map((sx) => {
+      const a = new THREE.Mesh(G.arcEye, M.eye); a.position.set(sx * 0.047, 0.066, 0.163); a.scale.setScalar(0.001); a.visible = false;
+      head.add(a); return a;
+    });
+    // current face, eased toward the mood's target every frame
+    this.face = { open: 1, w: 1, tilt: 0, dy: 0, arc: 0, flip: 0 };
     const antenna = new THREE.Mesh(G.antenna, M.white); antenna.position.y = 0.24;
     this.bulbMat = new THREE.MeshBasicMaterial({ color: this.accent });
     const bulb = (this.bulb = new THREE.Mesh(G.bulb, this.bulbMat)); bulb.position.y = 0.285;
@@ -291,12 +310,13 @@ export class Astronaut {
     this.check = sprite(bubbleTexture('✓', '#5fbf8f'), 0.2); this.check.position.y = 0.88;
     this.toolIcon = sprite(emojiTexture('💭'), 0.17); this.toolIcon.position.y = 0.86;
     this.zzz = sprite(emojiTexture('💤'), 0.17); this.zzz.position.set(0.12, 0.3, 0.1);
+    this.sweat = sprite(emojiTexture('💧'), 0.1);
     this.toolIcon.userData.emoji = '💭';
     // speech bubble: what it's touching right now ("app.js", "npm test", "“notch”")
     this.speech = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false }));
     this.speech.center.set(0.5, 0);
     this.speech.userData.text = '';
-    for (const s of [this.bubble, this.check, this.toolIcon, this.zzz, this.speech]) { s.visible = false; root.add(s); }
+    for (const s of [this.bubble, this.check, this.toolIcon, this.zzz, this.speech, this.sweat]) { s.visible = false; root.add(s); }
 
     this.drones = [];
     root.scale.setScalar(1.15);
@@ -315,6 +335,7 @@ export class Astronaut {
   /** Project (or its name) changed: switch suit colour and hat to that crew's look. */
   applyLook(key) {
     this.lookKey = key;
+    this.lookSig = lookSig(key);
     this.accent = accentFor(key);
     const mat = accentMat(this.accent);
     for (const m of this.accentMeshes) m.material = mat;
@@ -326,7 +347,7 @@ export class Astronaut {
     const prev = this.data.status;
     this.data = d;
     const key = lookKeyOf(d);
-    if (key !== this.lookKey || accentFor(key) !== this.accent) this.applyLook(key);
+    if (key !== this.lookKey || lookSig(key) !== this.lookSig) this.applyLook(key);
     if (prev === 'working' && (d.status === 'done' || (d.cowork && d.status === 'idle')) && this.landed) {
       this.env.fx.confetti(this.root.position, this.p);
       this.cheerUntil = performance.now() / 1000 + 1.6;
@@ -450,6 +471,9 @@ export class Astronaut {
     const act = s === 'working' ? activityOf(d.tool) : null;
     // Cowork sessions have no live status: they hang out at their project's house and never nap
     const sleeping = !d.cowork && (s === 'idle' || s === 'done') && Date.now() - d.since > SLEEP_MS;
+    // stuck: "working" but nothing has happened for a while — sweats and slows down
+    this.stuck = !d.cowork && !d.manual && s === 'working' && Date.now() - (d.updated || d.since || Date.now()) > STUCK_MS;
+    const slow = this.stuck ? 0.45 : 1;
     const ph = t + this.phase;
 
     // arrival (jetpack drop) & departure (jetpack off)
@@ -506,6 +530,7 @@ export class Astronaut {
     }
     if (this.greet && (mode === 'wander' || mode === 'walk' || mode === 'pause')) mode = 'greet';
 
+    speed *= slow;
     // ── move ──
     if (mode === 'walk' && target) {
       tmpV.copy(target).sub(this.p).projectOnPlane(this.p);
@@ -573,13 +598,15 @@ export class Astronaut {
       case 'work':
         if (act === 'build') {
           const prev = this.hammerK;
-          this.hammerK = (ph * 1.8) % 1;
+          this.hamPh = (this.hamPh ?? 0) + dt * 1.8 * slow;
+          this.hammerK = this.hamPh % 1;
           const k = this.hammerK;
           P.aRx = k < 0.72 ? -1.0 - ease(k / 0.72) * 1.6 : -2.6 + ((k - 0.72) / 0.28) * 1.6;
           P.aLx = -0.75; P.rx = 0.12; P.hx = 0.25;
           if (k < prev && this.site) this.strike();
         } else if (act === 'terminal') {
-          P.aLx = -1.15 + Math.sin(ph * 24) * 0.1; P.aRx = -1.15 + Math.sin(ph * 24 + 3) * 0.1;
+          const ty = this.stuck ? ph * 6 : ph * 24;
+          P.aLx = -1.15 + Math.sin(ty) * 0.1; P.aRx = -1.15 + Math.sin(ty + 3) * 0.1;
           P.aLz = -0.1; P.aRz = 0.1; P.hx = 0.22 + Math.sin(ph * 0.7) * 0.05; P.y = Math.sin(ph * 3) * 0.004;
         } else {
           P.aRz = 2.2 + Math.sin(ph * 2.5) * 0.15; P.aRx = -0.4; P.hx = -0.35; P.hy = Math.sin(ph * 0.8) * 0.2;
@@ -671,10 +698,19 @@ export class Astronaut {
 
     if (this.hat?.userData.spin) this.hat.userData.spin.rotation.y += dt * (s === 'working' ? 14 : 3);
 
-    // blink (and keep eyes shut while napping)
-    // napping astronauts peek one eye open when you come close
-    const blink = lie > 0.5 ? (this.noticed ? 0.6 : 0.12) : (ph % 3.7) < 0.12 ? 0.15 : 1;
-    this.eyes[0].scale.y = this.eyes[1].scale.y = EYE_H * blink;
+    this.updateFace(ph, dt, lie > 0.5 ? 'sleep'
+      : s === 'help' ? 'worried'
+      : (s === 'done' && !sleeping) || t < this.cheerUntil || this.jumpT >= 0 ? 'happy'
+      : s === 'working' ? (this.stuck ? 'worried' : 'focused') : 'normal');
+
+    // sweat drop beside the helmet while stuck: slides down, fades, repeats
+    this.sweat.visible = this.stuck && !flying;
+    if (this.sweat.visible) {
+      const u = (ph * 0.55) % 1;
+      this.sweat.position.set(0.17, 0.6 - u * 0.09, 0.07);
+      this.sweat.material.opacity = Math.min(1, u * 5) * (1 - u * u);
+      this.sweat.scale.setScalar(0.1 * (0.8 + Math.min(1, u * 4) * 0.2));
+    }
 
     // antenna bulb: steady accent, blinking orange when it needs you, flicker while busy
     if (mode === 'wave') this.bulbMat.color.set(Math.sin(ph * 10) > 0 ? '#ff7a45' : '#ffd0b8');
@@ -776,8 +812,9 @@ export class Astronaut {
     this.head.rotation.set(P.hx, P.hy, 0);
     this.body.rotation.set(-lean, P.by || 0, 0); this.body.userData.lie = 0;
     this.body.position.y = P.y; this.body.scale.set(1, 1, 1);
-    this.eyes[0].scale.y = this.eyes[1].scale.y = EYE_H;
-    for (const o of [this.bubble, this.check, this.toolIcon, this.zzz, this.speech, this.ring, this.flame, this.hammer, this.lens, this.clip]) o.visible = false;
+    this.face.open = 1; this.face.arc = 0; this.face.w = 1; this.face.tilt = 0; this.face.dy = 0;
+    this.updateFace(1, 0, 'normal');
+    for (const o of [this.sweat, this.bubble, this.check, this.toolIcon, this.zzz, this.speech, this.ring, this.flame, this.hammer, this.lens, this.clip]) o.visible = false;
     if (this.photo.emote) {
       // a little emote above the head (re-using the tool icon sprite)
       if (this.toolIcon.userData.emoji !== this.photo.emote) {
@@ -790,6 +827,42 @@ export class Astronaut {
       this.toolIcon.position.y = 0.98;
     }
     return true;
+  }
+
+  /**
+   * Faces with feelings. Eyes ease toward each mood:
+   * normal (blinks) · focused (narrowed) · worried (smaller, tilted inward, a tiny wobble) ·
+   * happy (^ ^ arcs) · sleep (closed ∪ arcs; one eye peeks when you come close).
+   */
+  updateFace(ph, dt, mood) {
+    const f = this.face;
+    const T = { open: 1, w: 1, tilt: 0, dy: 0, arc: 0, flip: 0 };
+    if (mood === 'focused') { T.open = 0.6; T.dy = -0.004; }
+    else if (mood === 'worried') { T.open = 1.05; T.w = 0.8; T.tilt = 0.55; T.dy = 0.003; }
+    else if (mood === 'happy') { T.open = 0; T.arc = 1; }
+    else if (mood === 'sleep') { T.open = 0; T.arc = 1; T.flip = 1; }
+    const peek = mood === 'sleep' && this.noticed; // napping: one eye peeks open at you
+    const k = damp(9, dt);
+    for (const key of ['open', 'w', 'tilt', 'dy']) f[key] += (T[key] - f[key]) * k;
+    // swap ∩ ↔ ∪ only while the arcs are (nearly) hidden, so they never visibly flip
+    if (f.flip !== T.flip && f.arc < 0.15) f.flip = T.flip;
+    f.arc += ((f.flip === T.flip ? T.arc : 0) - f.arc) * k;
+    const blink = mood === 'normal' || mood === 'focused' ? ((ph % 3.7) < 0.12 ? 0.15 : 1) : 1;
+    const wob = mood === 'worried' ? Math.sin(ph * 15) * 0.0016 : 0;
+    for (let i = 0; i < 2; i++) {
+      const e = this.eyes[i], sx = e.userData.sx;
+      const open = peek && i === 1 ? 0.55 : f.open;
+      e.visible = open > 0.03;
+      e.scale.set(f.w, EYE_H * Math.max(0.001, open * blink) * f.w, 0.55);
+      e.rotation.z = -sx * f.tilt; // tops lean toward the middle: worried
+      e.position.set(sx * 0.047 + wob, 0.07 + f.dy, 0.161);
+      const a = this.arcs[i];
+      const arc = peek && i === 1 ? 0 : f.arc;
+      a.visible = arc > 0.03;
+      a.scale.setScalar(Math.max(0.001, arc));
+      a.rotation.z = f.flip ? Math.PI : 0;
+      a.position.y = f.flip ? 0.074 : 0.064 + Math.sin(ph * 4) * 0.0012 * arc; // happy eyes bob a little
+    }
   }
 
   strike() {
@@ -863,7 +936,7 @@ export class Astronaut {
     this.env.world.remove(this.root);
     if (this.site) this.env.world.remove(this.site.prop);
     for (const o of this.oldProps ?? []) this.env.world.remove(o.prop);
-    for (const m of [this.ringMat, this.bulbMat, this.bubble.material, this.check.material, this.toolIcon.material, this.zzz.material, this.speech.material]) m.dispose();
+    for (const m of [this.ringMat, this.bulbMat, this.bubble.material, this.check.material, this.toolIcon.material, this.zzz.material, this.speech.material, this.sweat.material]) m.dispose();
   }
 }
 

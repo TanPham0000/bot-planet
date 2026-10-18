@@ -403,12 +403,13 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
   let moonBoing = 0;
 
   // ── stars ──
+  const starMat = new THREE.PointsMaterial({ color: 0xfff7d6, size: 0.09, transparent: true, opacity: 0.85, depthWrite: false });
   {
     const p = new Float32Array(stars * 3);
     for (let i = 0; i < stars; i++) randomDir().multiplyScalar(starRadius[0] + rand() * (starRadius[1] - starRadius[0])).toArray(p, i * 3);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(p, 3));
-    scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xfff7d6, size: 0.09, transparent: true, opacity: 0.85, depthWrite: false })));
+    scene.add(new THREE.Points(g, starMat));
   }
 
   // ── shooting star (lives in camera space, far behind the planet) ──
@@ -427,9 +428,72 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
   const stemMat = new THREE.MeshLambertMaterial({ color: '#6cc79a', flatShading: true });
   const poked = [];
 
+  // ── time of day ──
+  const tod = { day: 1, night: 0, golden: 0, hour: 12 };
+  const base = new WeakMap(); // each light's own (daytime) colour + intensity, captured on first use
+  const baseOf = (l) => {
+    if (!base.has(l)) base.set(l, { color: l.color.clone(), intensity: l.intensity, ground: l.groundColor?.clone() });
+    return base.get(l);
+  };
+  const atmoDay = atmo.material.uniforms.color.value.clone();
+  const mixC = (out, day, golden, night, k) => out.copy(day).lerp(golden, k.golden).lerp(night, k.night);
+  const TOD = {
+    sun: { golden: new THREE.Color('#ffbf85'), night: new THREE.Color('#b4bcf5'), gI: 0.95, nI: 0.42 },
+    rim: { golden: new THREE.Color('#d1a6ff'), night: new THREE.Color('#8d8cff'), gI: 1.1, nI: 1.25 },
+    hemi: { golden: new THREE.Color('#ffdcb8'), night: new THREE.Color('#7a7fc4'), gG: new THREE.Color('#8a68a8'), nG: new THREE.Color('#2c2556'), gI: 0.92, nI: 0.62 },
+    atmo: { golden: new THREE.Color('#ffb98c'), night: new THREE.Color('#5e55d6') },
+  };
+  /** Where the lights live when the caller doesn't pass them: hemisphere in the scene, sun + rim on the camera. */
+  function findLights() {
+    let hemi = null;
+    scene.traverse((o) => { if (!hemi && o.isHemisphereLight) hemi = o; });
+    const dirs = camera.children.filter((o) => o.isDirectionalLight).sort((a, b) => baseOf(b).intensity - baseOf(a).intensity);
+    return { hemi, sun: dirs[0] ?? null, rim: dirs[1] ?? null };
+  }
+
   const tmp = new THREE.Vector3();
   return {
     world, atmo, moon, campDir, seats, fire, boardAnchor, CAMP_RADIUS, setContinents,
+    /** Last computed { day, night, golden, hour } (0…1 each). */
+    timeOfDay: tod,
+    /**
+     * Light the planet for the local clock: day (sunrise ~7:00), golden hour around sunrise and sunset
+     * (~19:30), deep blue-violet night with brighter stars and a stronger campfire.
+     * lights: { sun, rim, hemi } — found in the scene/camera when omitted. Returns { day, night, golden, hour }.
+     * Cheap; call it every minute or so (and pass `night` on to village.setNight).
+     */
+    setTimeOfDay(date = new Date(), lights = {}) {
+      const d = date instanceof Date ? date : new Date(date);
+      const h = d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+      const ss = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+      const day = ss(6.2, 7.8, h) * (1 - ss(18.9, 20.4, h));
+      const bump = (c, w) => Math.max(0, 1 - Math.abs(h - c) / w);
+      // golden hour: warm around sunrise and the hour before sunset, fading as night takes over
+      const golden = Math.min(1, ss(0, 1, bump(7.4, 1.3)) + ss(0, 1, bump(19.0, 1.6))) * (0.35 + 0.65 * day);
+      const night = 1 - day;
+      Object.assign(tod, { day, night, golden: 0.8 * golden * (1 - night * 0.6), hour: h });
+      const L = { ...findLights(), ...lights };
+      if (L.sun) {
+        const b = baseOf(L.sun);
+        mixC(L.sun.color, b.color, TOD.sun.golden, TOD.sun.night, tod);
+        L.sun.intensity = b.intensity * (1 + (TOD.sun.gI - 1) * tod.golden) * (1 + (TOD.sun.nI - 1) * night);
+      }
+      if (L.rim) {
+        const b = baseOf(L.rim);
+        mixC(L.rim.color, b.color, TOD.rim.golden, TOD.rim.night, tod);
+        L.rim.intensity = b.intensity * (1 + (TOD.rim.gI - 1) * tod.golden) * (1 + (TOD.rim.nI - 1) * night);
+      }
+      if (L.hemi) {
+        const b = baseOf(L.hemi);
+        mixC(L.hemi.color, b.color, TOD.hemi.golden, TOD.hemi.night, tod);
+        if (b.ground) mixC(L.hemi.groundColor, b.ground, TOD.hemi.gG, TOD.hemi.nG, tod);
+        L.hemi.intensity = b.intensity * (1 + (TOD.hemi.gI - 1) * tod.golden) * (1 + (TOD.hemi.nI - 1) * night);
+      }
+      mixC(atmo.material.uniforms.color.value, atmoDay, TOD.atmo.golden, TOD.atmo.night, tod);
+      starMat.opacity = 0.6 + 0.4 * night;
+      starMat.size = 0.085 + 0.035 * night;
+      return { ...tod };
+    },
     /** Plant a flower where the user poked (point in world-local space). */
     plant(localPoint) {
       const n = localPoint.clone().normalize();
@@ -453,7 +517,8 @@ export function buildWorld(scene, camera, { stars = 400, starRadius = [12, 40] }
       const f = 1 + Math.sin(t * 13) * 0.12 + Math.sin(t * 23.7) * 0.08;
       flameA.scale.set(1, f, 1); flameB.scale.set(1, 2 - f, 1);
       flameA.rotation.y = t * 2;
-      glow.material.opacity = 0.55 + Math.sin(t * 9) * 0.08;
+      glow.material.opacity = (0.55 + Math.sin(t * 9) * 0.08) * (1 + tod.night * 0.6);
+      glow.scale.setScalar(0.7 + tod.night * 0.45);
       flag.rotation.y = Math.sin(t * 3) * 0.25;
 
       for (const c of clouds) {

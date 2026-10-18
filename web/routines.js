@@ -93,7 +93,9 @@ export function stateOf(r, now = Date.now()) {
   const lastAt = r.lastRun?.at ? Date.parse(r.lastRun.at) : 0;
   const lastBusy = ['pending', 'running'].includes(r.lastRun?.status) && now - lastAt < 45 * 60000;
   const running = r.enabled && (lastBusy || (justFired && justFired <= now));
-  return { next, running, soon: !!next && next - now < 15 * 60000, lastAt };
+  // the last finished run failed (and nothing newer is under way)
+  const failed = r.lastRun?.status === 'failed' && !running;
+  return { next, running, soon: !!next && next - now < 15 * 60000, lastAt, failed };
 }
 
 // ── satellites ───────────────────────────────────────────────────────
@@ -113,6 +115,7 @@ export function createSatellites({ world, scene }) {
     panel: new THREE.MeshLambertMaterial({ color: '#5b8def', flatShading: true }),
     panelOff: new THREE.MeshLambertMaterial({ color: '#56536a', flatShading: true }),
     dish: new THREE.MeshLambertMaterial({ color: '#ffffff', side: THREE.DoubleSide }),
+    failed: new THREE.MeshLambertMaterial({ color: '#f2b8b8', emissive: '#5a1414', flatShading: true }),
   };
   /** id → { r, g, light, beam, axis, base, speed, radius, state } */
   const sats = new Map();
@@ -147,7 +150,8 @@ export function createSatellites({ world, scene }) {
         const s = sats.get(r.id) ?? make(r);
         s.r = r;
         const on = r.enabled;
-        s.g.userData.body.material = on ? mats.body : mats.off;
+        s.state = stateOf(r);
+        s.g.userData.body.material = s.state.failed ? mats.failed : on ? mats.body : mats.off;
         for (const p of s.g.userData.panels) p.material = on ? mats.panel : mats.panelOff;
         sats.set(r.id, s);
       }
@@ -157,9 +161,11 @@ export function createSatellites({ world, scene }) {
     refresh(now = Date.now()) {
       const started = [];
       for (const s of sats.values()) {
-        const was = s.state.running;
+        const was = s.prevRunning;
         s.state = stateOf(s.r, now);
+        s.g.userData.body.material = s.state.failed ? mats.failed : s.r.enabled ? mats.body : mats.off;
         if (s.state.running && !was && was !== undefined) started.push(s.r);
+        s.prevRunning = s.state.running;
       }
       return started;
     },
@@ -172,9 +178,10 @@ export function createSatellites({ world, scene }) {
         s.g.position.copy(tmp);
         s.g.quaternion.setFromUnitVectors(up, tmp.clone().normalize()); // dish faces the planet
         s.g.rotateY(t * 0.4);
-        // light: steady green, blinking amber when about to fire, orange when running, off when disabled
+        // light: red, slowly blinking, when the last run failed; steady green, blinking amber when about to fire, orange when running, off when disabled
         const lm = s.light.material;
-        if (!s.r.enabled) lm.color.set('#4b4766');
+        if (!s.r.enabled && !st.failed) lm.color.set('#4b4766');
+        else if (st.failed) lm.color.set('#ff3b3b').multiplyScalar(0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * 2.2))); // slow red pulse
         else if (st.running) lm.color.set(Math.sin(t * 8) > 0 ? '#ff7a45' : '#ffd0b8');
         else if (st.soon) lm.color.set(Math.sin(t * 5) > 0 ? '#ffc96b' : '#3b3552');
         else lm.color.set('#7fffd4');

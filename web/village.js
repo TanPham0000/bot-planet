@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { piece, at, place, groundR, height, offsetDir, surfaceQuat, makeRand, WATER } from './world.js';
 import { ACCENTS, hashStr } from './astronaut.js';
-import { colorFor, biomeFor } from './colors.js';
+import { colorFor, biomeFor, customFor } from './colors.js';
 
 // Finished turns needed for each level: tent, hut, cottage, house, two-storey, tower, observatory
 export const LEVELS = [1, 5, 15, 40, 100, 250, 600];
@@ -68,7 +68,31 @@ function building(level, roofC, wallC, rand) {
   return p;
 }
 
+/** Lit-window panes for one building (same local coords as building(), a hair in front of the glass). */
+function windowPieces(level) {
+  const p = [];
+  const pane = (x, y, z, w, h) => p.push(piece(G.box, '#ffffff', at(x, y, z, 0, 0, 0, S(w, h, 0.004))));
+  if (level <= 1) { pane(0, 0.034, 0.064, 0.036, 0.044); return p; } // a glowing tent flap
+  const W = [0, 0, 0.13, 0.17, 0.2, 0.22, 0.22, 0.22][level], H = [0, 0, 0.09, 0.11, 0.12, 0.2, 0.2, 0.2][level];
+  if (level === 2) { pane(0, 0.03, W * 0.43 + 0.003, 0.028, 0.05); return p; } // light under the hut door
+  pane(-W * 0.28, H * 0.6, W * 0.43 + 0.003, 0.024, 0.024);
+  pane(W * 0.28, H * 0.6, W * 0.43 + 0.003, 0.024, 0.024);
+  if (level >= 5) pane(0, H * 0.82, W * 0.43 + 0.003, 0.035, 0.025);
+  if (level >= 6) pane(-W * 0.62, 0.24, 0.03 + 0.003, 0.017, 0.026);
+  return p;
+}
+// Night windows: one shared material per brightness (active in the last day vs quiet), faded by setNight.
+const WIN_ACTIVE = new THREE.MeshBasicMaterial({ color: '#ffb547', vertexColors: true, transparent: true, opacity: 0, depthWrite: false });
+const WIN_QUIET = new THREE.MeshBasicMaterial({ color: '#ff9b40', vertexColors: true, transparent: true, opacity: 0, depthWrite: false });
+const ACTIVE_MS = 86400000;
+
 const plotKey = (name) => String(name).trim().toLowerCase();
+/** A custom spot as a unit Vector3, or null. */
+const spotVec = (spot) => {
+  if (!Array.isArray(spot) || spot.length !== 3 || !spot.every(Number.isFinite)) return null;
+  const v = new THREE.Vector3(...spot);
+  return v.lengthSq() > 1e-6 ? v.normalize() : null;
+};
 
 export function createVillage({ world, fx, campDir, campRadius }) {
   const group = new THREE.Group();
@@ -83,16 +107,40 @@ export function createVillage({ world, fx, campDir, campRadius }) {
    * Where a project's home goes: the dry, flat-ish spot farthest from every other home (and the camp),
    * so each continent gets room to spread. Biggest projects are placed first and get the best spots.
    */
+  /** Dry and flat enough for a house (its whole yard above water). */
+  const dryAt = (d) => {
+    if (height(d) < WATER + 0.035) return false;
+    for (let k = 0; k < 6; k++) if (height(offsetDir(d, (k / 6) * Math.PI * 2, 0.07)) < WATER + 0.02) return false;
+    return true;
+  };
+  let pinned = []; // snapped custom spots this round: auto-placed homes keep away from them too
+  /**
+   * A home at the spot chosen in the crew manager, snapped to the nearest dry, flat-ish land within
+   * ~0.25 rad, out of the camp clearing and not on top of another home.
+   */
+  function snapSpot(spot, others) {
+    let best = null, bestCost = Infinity;
+    const clearOf = (d) => d.angleTo(campDir) > campRadius + 0.12 && others.every((o) => o.angleTo(d) > 0.16);
+    const consider = (d) => {
+      if (!dryAt(d)) return;
+      const cost = d.angleTo(spot) + (clearOf(d) ? 0 : 1);
+      if (cost < bestCost) { bestCost = cost; best = d.clone(); }
+    };
+    consider(spot);
+    if (best && bestCost < 0.001) return best;
+    for (let r = 0.025; r <= 0.25001; r += 0.025) for (let k = 0, n = Math.round(6 + r * 60); k < n; k++) consider(offsetDir(spot, (k / n) * Math.PI * 2, r));
+    // dropped in the sea: walk outward to the nearest shore that can hold a house
+    for (let r = 0.3; !best && r <= 1.6; r += 0.05) for (let k = 0, n = Math.round(12 + r * 50); k < n; k++) consider(offsetDir(spot, (k / n) * Math.PI * 2, r));
+    return best ?? spot.clone();
+  }
+
   function plotDir(key) {
     const rand = makeRand((hashStr(key) % 2147483646) + 1);
     let best = null, bestScore = -1;
     for (let i = 0; i < 90; i++) {
       const d = offsetDir(campDir, rand() * Math.PI * 2, campRadius + 0.3 + rand() * 2.1);
-      if (height(d) < WATER + 0.035) continue;
-      let lo = Infinity;
-      for (let k = 0; k < 6; k++) lo = Math.min(lo, height(offsetDir(d, (k / 6) * Math.PI * 2, 0.07)));
-      if (lo < WATER + 0.02) continue;
-      const score = Math.min(d.angleTo(campDir) - campRadius * 0.6, ...taken.map((t) => t.angleTo(d)));
+      if (!dryAt(d)) continue;
+      const score = Math.min(d.angleTo(campDir) - campRadius * 0.6, ...taken.map((t) => t.angleTo(d)), ...pinned.map((t) => t.angleTo(d)));
       if (score > bestScore) { bestScore = score; best = d; }
     }
     best ??= offsetDir(campDir, rand() * Math.PI * 2, campRadius + 0.3 + rand() * 0.8);
@@ -128,7 +176,26 @@ export function createVillage({ world, fx, campDir, campRadius }) {
       }
     }
     const mesh = new THREE.Mesh(mergeGeometries(geos), mat);
+    // lit windows (hidden by day; setNight fades them in)
+    const win = new THREE.Mesh(mergeGeometries(place(windowPieces(p.level), p.dir, yaw, BUILDING_SCALE, 0.012)), WIN_QUIET);
+    win.visible = nightK > 0.02;
+    win.renderOrder = 1;
+    mesh.add(win);
+    p.win = win;
     return mesh;
+  }
+  const disposeMesh = (p) => {
+    if (!p.mesh) return;
+    group.remove(p.mesh); p.mesh.geometry.dispose();
+    if (p.win) { p.win.geometry.dispose(); p.win = null; }
+  };
+  let nightK = 0;
+  function paintWindows(now = Date.now()) {
+    for (const p of plots.values()) {
+      if (!p.win) continue;
+      p.win.material = now - (p.activeAt ?? p.project?.lastAt ?? 0) < ACTIVE_MS ? WIN_ACTIVE : WIN_QUIET;
+      p.win.visible = nightK > 0.02;
+    }
   }
 
   function rebuildPaths() {
@@ -150,9 +217,20 @@ export function createVillage({ world, fx, campDir, campRadius }) {
     group.add(pathMesh);
   }
 
-  let smokeT = 0;
+  let smokeT = 0, movedN = 0;
   const api = {
     plots,
+    /**
+     * 0 = day … 1 = night: house windows glow warm, brighter for projects active in the last day.
+     * Cheap; call it whenever the time of day is recomputed (e.g. with world.setTimeOfDay).
+     */
+    setNight(k) {
+      nightK = Math.max(0, Math.min(1, +k || 0));
+      WIN_ACTIVE.opacity = nightK;
+      WIN_QUIET.opacity = nightK * 0.45;
+      paintWindows();
+    },
+    get night() { return nightK; },
     /** Continent seeds for world.setContinents: every home whose project has a colour. */
     seeds() {
       const out = [];
@@ -180,7 +258,12 @@ export function createVillage({ world, fx, campDir, campRadius }) {
      * activity: Map(lower-case name → { score, lastAt }) — recent use. Projects untouched for
      * IDLE_DAYS vanish; the rest get a country whose size follows their score.
      */
-    update(village, { animate = true, cowork = [], names = {}, activity = null } = {}) {
+    /**
+     * custom: crew-manager looks keyed by nameKey (defaults to colors.js's store): `hidden` projects get
+     * no plot (so no continent either); `spot` ([x,y,z] unit vector) pins the home near that point.
+     */
+    update(village, { animate = true, cowork = [], names = {}, activity = null, custom = null } = {}) {
+      const look = (name) => (custom ? custom[plotKey(name)] || {} : customFor(name));
       const grew = [];
       const byName = new Map();
       const add = (name, data) => {
@@ -202,7 +285,7 @@ export function createVillage({ world, fx, campDir, campRadius }) {
         const last = Math.max(p.lastAt || 0, a?.lastAt || 0);
         return now - last < IDLE_DAYS * 86400000 || (a?.score || 0) > 0.5;
       };
-      const all = [...byName.values()].filter(recent).sort((a, b) => (act(b)?.score || 0) - (act(a)?.score || 0) || b.turns - a.turns);
+      const all = [...byName.values()].filter((p) => recent(p) && !look(p.name).hidden).sort((a, b) => (act(b)?.score || 0) - (act(a)?.score || 0) || b.turns - a.turns);
       const projects = all.slice(0, MAX_PLOTS);
       const maxScore = Math.max(1, ...projects.map((p) => act(p)?.score || 0));
       for (const p of projects) p.footprint = Math.sqrt((act(p)?.score || 0) / maxScore); // 0…1
@@ -215,11 +298,44 @@ export function createVillage({ world, fx, campDir, campRadius }) {
         if (ti >= 0) taken.splice(ti, 1);
       }
       let changedPaths = false;
+      // homes pinned in the crew manager: snap each to land first, so auto-placed homes avoid them
+      const wantSpot = new Map();
+      pinned = [];
+      for (const proj of projects) {
+        const v = spotVec(look(proj.name).spot);
+        if (!v) continue;
+        const sig = v.toArray().map((x) => x.toFixed(4)).join(',');
+        const cur = plots.get(proj.key);
+        const others = [...pinned];
+        for (const q of plots.values()) if (q.key !== proj.key && !q.vanishing) others.push(q.dir);
+        const dir = cur && cur.spotSig === sig && !cur.vanishing ? cur.dir : snapSpot(v, others);
+        wantSpot.set(proj.key, { dir, sig });
+        pinned.push(dir);
+      }
       for (const proj of projects) {
         const level = levelOf(proj.turns);
         let p = plots.get(proj.key);
+        const want = wantSpot.get(proj.key);
+        const spotSig = want?.sig ?? '';
+        let movedNow = false;
+        if (p && (p.spotSig ?? '') !== spotSig) {
+          // moved in the crew manager (or unpinned): the old house sinks, a new one grows at the new place
+          const ti = taken.indexOf(p.dir);
+          if (ti >= 0) taken.splice(ti, 1);
+          plots.delete(proj.key);
+          movedNow = true;
+          if (p.mesh) {
+            p.vanishing ||= 1;
+            plots.set(`${proj.key}#moved${++movedN}`, p);
+          }
+          p = null;
+        }
         if (!p) {
-          p = { key: proj.key, dir: plotDir(proj.key), level: 0, mesh: null, grow: animate ? 0 : 1 };
+          const dir = want ? want.dir : plotDir(proj.key);
+          if (want) taken.push(dir);
+          p = { key: proj.key, dir, spotSig, level: 0, mesh: null, grow: animate || movedNow ? 0 : 1 };
+          if (movedNow) fx.puff?.(dir.clone().multiplyScalar(groundR(dir)), dir, 10);
+          movedNow = false;
           plots.set(proj.key, p);
           changedPaths = true;
         }
@@ -227,11 +343,12 @@ export function createVillage({ world, fx, campDir, campRadius }) {
         p.turns = proj.turns;
         p.project = proj;
         p.footprint = proj.footprint ?? 0.3;
+        p.activeAt = Math.max(proj.lastAt || 0, act(proj)?.lastAt || 0);
         if (p.vanishing) { p.vanishing = 0; p.grow = 0; } // came back: grow again
         if (level !== p.level) {
           if (p.level && level > p.level) grew.push(p);
           p.level = level;
-          if (p.mesh) { group.remove(p.mesh); p.mesh.geometry.dispose(); }
+          disposeMesh(p);
           p.mesh = buildPlot(p, proj);
           group.add(p.mesh);
           if (animate && p.grow >= 1) {
@@ -241,12 +358,13 @@ export function createVillage({ world, fx, campDir, campRadius }) {
           }
         } else if (p.mesh && colorFor(proj.name) && colorFor(proj.name) !== p.color) {
           // project got (or changed) its colour: repaint the roof
-          group.remove(p.mesh); p.mesh.geometry.dispose();
+          disposeMesh(p);
           p.mesh = buildPlot(p, proj);
           group.add(p.mesh);
         }
       }
       void changedPaths; // (stepping-stone paths removed: they made the planet look messy)
+      paintWindows(now);
       return grew;
     },
     tick(t, dt) {
@@ -255,7 +373,7 @@ export function createVillage({ world, fx, campDir, campRadius }) {
         p.vanishing += dt * 0.8;
         const s = Math.max(0.001, 2 - p.vanishing);
         if (p.mesh) { p.mesh.scale.setScalar(s); p.mesh.position.copy(p.dir).multiplyScalar(groundR(p.dir) * (1 - s)); }
-        if (p.vanishing >= 2) { if (p.mesh) { group.remove(p.mesh); p.mesh.geometry.dispose(); } plots.delete(k); }
+        if (p.vanishing >= 2) { disposeMesh(p); plots.delete(k); }
       }
       for (const p of plots.values()) {
         if (p.vanishing) continue;

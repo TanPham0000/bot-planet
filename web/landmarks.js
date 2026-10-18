@@ -4,11 +4,22 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { piece, at, groundR, height, offsetDir, surfaceQuat, WATER } from './world.js';
+import { customFor, setCustom } from './colors.js';
 
 const plotKey = (name) => String(name ?? '').trim().toLowerCase();
 
-/** Which landmark a project gets. Order matters: the specific themes win over "looks like code". */
+export const THEMES = ['lighthouse', 'printshop', 'server', 'vault', 'windmill'];
+/** Crew-manager looks (same store as colors.setCustom): `custom[nameKey].theme` picks the landmark. */
+export const setCustomThemes = setCustom;
+
+/** Which landmark a project gets: the one chosen in the crew manager, else guessed from the name. */
 export function themeOf(name, key = '') {
+  const picked = customFor(name).theme;
+  if (THEMES.includes(picked)) return picked;
+  return guessTheme(name, key);
+}
+/** Order matters: the specific themes win over "looks like code". */
+export function guessTheme(name, key = '') {
   const n = String(name ?? '').toLowerCase();
   if (/outreach|crm|rhythm|leads?\b/.test(n)) return 'lighthouse';
   if (/proposal|quote|offerte/.test(n)) return 'printshop';
