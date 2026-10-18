@@ -373,3 +373,41 @@ export function createGlobe(el, labelsEl, { onPlace }) {
   views.push({ el, renderer, scene, camera, tick, after });
   return { setPins, focus };
 }
+
+// ── agent portraits for the Agents grid ─────────────────────────────
+// One shared offscreen renderer draws each look once (colour + hat + pose) into a cached PNG, so a grid of
+// 50 cards costs 50 small images, not 50 WebGL contexts or a render loop.
+let pr = null;
+const portraits = new Map();
+export function portrait({ name = '', color = '#b9b3cc', hat = null, status = 'idle' } = {}) {
+  const sig = `${name}|${color}|${hat}|${status}`;
+  if (portraits.has(sig)) return portraits.get(sig);
+  if (!pr) {
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(2); renderer.setSize(96, 108, false);
+    renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.setClearColor(0x000000, 0);
+    const scene = new THREE.Scene(); lights(scene);
+    const camera = new THREE.PerspectiveCamera(24, 96 / 108, 0.01, 20);
+    camera.position.set(0.18, 0.5, 1.55); camera.lookAt(0, 0.3, 0);
+    const world = new THREE.Group(); scene.add(world);
+    pr = { renderer, scene, camera, world };
+  }
+  const a = new Astronaut({ id: 'portrait', name, status: 'idle', tool: '', subagents: [], since: Date.now(), updated: Date.now() },
+    { world: pr.world, fx: FX, campDir: UP, campRadius: 0.1, seatDir: () => null }, UP.clone());
+  a.root.position.set(0, 0, 0); a.root.quaternion.identity(); a.root.scale.setScalar(1); a.root.rotation.y = 0.35;
+  a.accent = color;
+  for (const mesh of a.accentMeshes) mesh.material = accentMat(color);
+  a.bulbMat.color.set(color);
+  a.setHat(hat);
+  // a pose that says what it's doing: waving for help, arm out while working, relaxed otherwise
+  a.armR.rotation.set(0, 0, status === 'help' ? 2.6 : status === 'working' ? 1.2 : 0.25);
+  a.armL.rotation.set(0, 0, status === 'working' ? -0.9 : -0.25);
+  a.head.rotation.set(status === 'help' ? -0.2 : -0.06, 0.12, status === 'help' ? 0.12 : 0);
+  if (status === 'done') a.eyes[0].scale.y = a.eyes[1].scale.y = 0.5;
+  pr.renderer.render(pr.scene, pr.camera);
+  const url = pr.renderer.domElement.toDataURL('image/png');
+  a.dispose();
+  portraits.set(sig, url);
+  return url;
+}

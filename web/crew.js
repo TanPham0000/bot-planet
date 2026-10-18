@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { PALETTE, setCustom } from './colors.js';
 import { ACCENTS, HATS, hashStr, describe } from './astronaut.js';
 import { THEMES, guessTheme } from './landmarks.js';
-import { createPreview, createGlobe, autoSpots, renderOnce } from './crew-3d.js';
+import { createPreview, createGlobe, autoSpots, renderOnce, portrait } from './crew-3d.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -577,6 +577,7 @@ function agentCard(a) {
       <span class="st ${a.status}"><span class="dot ${a.status}"></span>${STATUS[a.status][0]}</span>
       <span class="sp"></span>${showBtn(a)}${openBtn(a)}
     </div>
+    <img class="ac-face" alt="" src="${portrait({ name: p?.name || a.project, color, hat: p ? lookOf(p).hat : null, status: a.status })}" />
     <input class="aname" data-aname="${esc(a.id)}" value="${a.named ? esc(a.name) : ''}" placeholder="${esc(a.fallback)}" maxlength="60" spellcheck="false" title="Name this agent (Enter to save)" aria-label="Agent name" />
     <div class="ac-doing"><b>${a.kind === 'code' ? '<span class="chip code">Code</span> ' : ''}${esc(a.doing)}${a.subagents ? ` · ${plural(a.subagents, 'helper')}` : ''}</b><small>${sub}</small></div>
     <div class="ac-foot">${foot}</div>

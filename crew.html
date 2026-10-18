@@ -276,6 +276,10 @@
   #toast.on.act { pointer-events: auto; }
   #toast button { border: 0; background: #24214a; color: var(--ink); font-weight: 800; border-radius: 8px; padding: 3px 10px; }
   ::-webkit-scrollbar { width: 10px; } ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .14); border-radius: 9px; border: 2px solid transparent; background-clip: padding-box; }
+  /* 3D portrait of each agent (pre-rendered in crew-3d.js), tucked in the card's top-right */
+  .acard { position: relative; }
+  .acard .ac-face { position: absolute; right: 8px; top: 34px; width: 48px; height: 54px; pointer-events: none; filter: drop-shadow(0 3px 4px rgba(0,0,0,.35)); }
+  .acard .aname, .acard .ac-doing { padding-right: 56px; box-sizing: border-box; }
 </style>
 </head>
 <body>
